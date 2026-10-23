@@ -2,12 +2,14 @@
 
 更新：2026-10-23。本文是发布准备清单，不构成已经完成授权审查或已发布的声明。
 
+**当前规则：仓库私有，仅供用户验收；验收完成并明确同意后才对外开放。** 早前公开与CI记录保留为历史，不代表当前仍可匿名访问。初次上传脚本已改为只创建/接受私有仓库。
+
 ## 项目身份与仓库边界
 
 - 名称：TransInput。
-- 归属：[jihongit](https://github.com/jihongit) 的个人开源项目，公开仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput)。
+- 归属：[jihongit](https://github.com/jihongit) 的个人项目，私有验收仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput)，未来公开需用户另行批准。
 - 用户已在本机完成Git Credential Manager授权，认证API核对账号jihongit/id32673991；认证后确认同名仓库不存在，才创建公开仓库并推送独立白名单源码。首次提交`7518c5845dea364e6e54fd9bb34994d3a494cf59`，无旧版或父工程历史，未上传凭据和个人数据。
-- 当前工作区含修改过的 Weasel、依赖、模型、安装包和个人开发产物，不能整个上传。新项目应有独立来源边界。
+- 旧工作区Weasel、旧依赖/模型/安装包等28项已按用户具体批准永久删除。新版个人备份、构建和测试产物仅保留本机；只能白名单导出独立源码。
 - 不搬用现有输入法项目的实现代码并声称原创。可以参考官方接口、行为规格和公开架构；确需引入的通用库独立登记来源及许可。
 
 ## 源码许可方向
@@ -48,7 +50,7 @@
 
 核心资料包括 README、准确的 LICENSE / NOTICE、依赖与词库来源、可复现构建步骤、安装卸载说明、隐私说明、版本 / 已知问题和源码获取方式。贡献指南、问题模板、安全报告方式与维护规则为推荐工程资料，不冒称它们全都是 GitHub 强制要求。
 
-已发布PRIVACY.md、CONTRIBUTING.md、SECURITY.md与Windows安装准备；隐私说明包含本地学习和敏感输入边界。GitHub私密安全报告已启用，首次远端双架构CI通过；没有正式发布tag、签名安装包或完成系统安装。实际构建与测试以docs/testing/最新报告为准，不能把开源成功当作可发行。
+已准备PRIVACY.md、CONTRIBUTING.md、SECURITY.md与Windows安装资料，隐私说明包括本地学习、配置迁移和敏感输入边界。首次远端双架构CI通过；当前仓库已改私有，公开前需重新核对私密漏洞报告功能。尚无正式tag、签名安装包或新版系统安装验收，不能把源码已同步当作可发行。
 
 已发布`.github/workflows/windows-console.yml`的x64/x86控制台构建检查、问题表单和PR模板；首次GitHub runner执行两架构均通过，工具版本及范围见 [CI工具记录](../sources/CI.md)。它不执行TSF桌面激活、正式安装、真实应用或付费请求，不代替这些验收。正式tag、安装包、校验和及必要签名仍待完成。源码、用户数据、私有密钥与发布权限严格分开。
 

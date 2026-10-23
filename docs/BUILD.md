@@ -60,7 +60,7 @@ Windows 后台输出为 `TransInputBroker.exe` 与独立 `TransInputTranslator.e
 
 完整检查还包含每架构 10 秒固定文字资源场景和隔离副本自检。额外执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\soak-windows.ps1 -Architecture all -Seconds 60` 可分别采样两架构的编辑器及其自有后台；时长可设 10～28,800 秒。上限检查用于发现失控增长，不等于长期无泄漏证明。该测试不进行付费请求、不操作其他应用或个人文档。
 
-默认全套检查没有付费请求。单独 `cmd /c scripts\msvc.cmd x64 live` 仅构建真实接口测试器；实际执行还要求 `--approved-fixed-cases` 和绝对核心 DLL 路径，会使用当前用户旧版已保存凭据发送固定九句文本，不能放进 CI。具体授权、执行和结果见 [真实接口记录](testing/2026-10-21-deepseek-live.md)。
+默认全套检查没有付费请求。`cmd /c scripts\msvc.cmd x64 live` 仅构建真实接口测试器，x86替换架构。`deepseek-live.exe --check-configuration` 只用当前用户新版配置验证本机解密，不发送请求；2026-10-23双架构已验证迁移后配置可读。实际远端执行仍要求`--approved-fixed-cases`及绝对核心DLL路径，发送固定九句，不能放进CI；不再读取旧版目录。历史真实接口证据见 [记录](testing/2026-10-21-deepseek-live.md)。
 
 当前没有引入 CMake、Qt、Flutter、WinUI 或第三方 Cargo crate。后续引入时需同步锁定版本、构建方式和许可证，避免文档与实际依赖不一致。
 
@@ -72,4 +72,4 @@ Windows 后台输出为 `TransInputBroker.exe` 与独立 `TransInputTranslator.e
 
 完整回归后，`scripts\package-windows.ps1 -Channel preview` 生成Windows开发预览ZIP和SHA256，校验同一轮x64/x86、源码与二进制哈希。它不会安装；`release`仍受签名和实际宿主验收门槛限制。`scripts\export-source.ps1` 只导出独立项目白名单，排除父工程、工具链、构建和个人数据，并拒绝目录链接及已知密钥模式。导出不是所有潜在秘密都不存在的保证，发布前仍审查清单。
 
-`scripts\publish-github.ps1 -SourceDirectory <最新独立导出路径>` 仅用于初次建立空远端，已于2026-10-23执行完成。仓库已有历史后会主动拒绝再次初始化；后续请克隆并通过正常Git提交/分支维护，不使用强制推送。该脚本不执行正式发行。全部PowerShell命令的ExecutionPolicy参数仅影响调用进程，不修改系统策略。
+`scripts\publish-github.ps1 -SourceDirectory <最新独立导出路径>` 仅用于初次建立空远端，已有历史时主动拒绝重建。当前已改为只创建/接受私有仓库，不提供自动公开选项；只有用户验收并明确批准后才另行更改可见性。后续通过正常Git提交/分支维护，不强制推送。该脚本不执行正式发行。ExecutionPolicy参数仅影响调用进程，不修改系统策略。

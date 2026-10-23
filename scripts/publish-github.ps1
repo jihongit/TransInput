@@ -32,10 +32,10 @@ try{
     try{$tiRepository=Invoke-RestMethod -Uri 'https://api.github.com/repos/jihongit/TransInput' -Headers $tiHeaders -TimeoutSec 30}
     catch{if([int]$_.Exception.Response.StatusCode -ne 404){throw 'Repository lookup failed; nothing pushed.'}}
     if(-not $tiRepository){
-        $tiBody=@{name='TransInput';private=$false;auto_init=$false;has_issues=$true;description='Independent Windows Chinese input and optional DeepSeek translation; Rust core and native TSF.'}|ConvertTo-Json
+        $tiBody=@{name='TransInput';private=$true;auto_init=$false;has_issues=$true;description='Independent Windows Chinese input and optional DeepSeek translation; Rust core and native TSF.'}|ConvertTo-Json
         $tiRepository=Invoke-RestMethod -Method Post -Uri 'https://api.github.com/user/repos' -Headers $tiHeaders -ContentType 'application/json' -Body $tiBody -TimeoutSec 30
     }
-    if($tiRepository.full_name -cne 'jihongit/TransInput' -or $tiRepository.private){throw 'Repository identity/visibility differs; no push performed.'}
+    if($tiRepository.full_name -cne 'jihongit/TransInput' -or -not $tiRepository.private){throw 'Repository must remain private until explicit user acceptance; no push performed.'}
     $tiRemote='https://jihongit@github.com/jihongit/TransInput.git'
     $tiRefs=@(git -c credential.username=jihongit ls-remote $tiRemote)
     if($LASTEXITCODE -ne 0){throw 'Cannot verify remote repository state.'}
@@ -50,9 +50,9 @@ try{
     git -C $tiSource -c credential.username=jihongit push --set-upstream origin main
     if($LASTEXITCODE -ne 0){throw 'Push failed; local export and commit preserved.'}
     $tiCommit=(git -C $tiSource rev-parse HEAD).Trim()
-    [ordered]@{repository=$tiRepository.html_url;commit=$tiCommit;source=$tiSource;file_count=$tiManifest.files.Count;published_at=(Get-Date).ToUniversalTime().ToString('o')}|
+    [ordered]@{repository=$tiRepository.html_url;private=$true;commit=$tiCommit;source=$tiSource;file_count=$tiManifest.files.Count;published_at=(Get-Date).ToUniversalTime().ToString('o')}|
         ConvertTo-Json|Set-Content (Join-Path (Split-Path -Parent $tiSource) 'publication.json') -Encoding UTF8
-    Write-Output ('Published source: '+$tiRepository.html_url+' @ '+$tiCommit)
+    Write-Output ('Uploaded private source: '+$tiRepository.html_url+' @ '+$tiCommit)
 }finally{
     $tiHeaders=$null;$tiCredential=$null;$tiPasswordLine=$null
     $env:GCM_INTERACTIVE=$tiOldInteractive;$env:GIT_TERMINAL_PROMPT=$tiOldPrompt

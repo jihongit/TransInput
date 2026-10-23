@@ -2,20 +2,18 @@
 
 状态：已实现Rust核心、Windows TSF、中文输入与可选DeepSeek翻译；当前交付开发预览，尚未达到日常安装发行条件。更新日期：2026-10-23（Asia/Shanghai）。最新检查与阻塞见 [Windows交付记录](docs/DELIVERY.md)。
 
-[![Windows console checks](https://github.com/jihongit/TransInput/actions/workflows/windows-console.yml/badge.svg)](https://github.com/jihongit/TransInput/actions/workflows/windows-console.yml)
-
-源码已公开于 [jihongit/TransInput](https://github.com/jihongit/TransInput)，首次GitHub Windows x64/x86构建与控制台检查均通过。它不代替实际系统安装、真实应用及长时验收；见 [开源发布记录](docs/testing/2026-10-23-github.md)。
+仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput) 当前为**私有验收仓库**，须登录授权账号访问。只有用户验收并明确同意后才可公开，不发布公开安装包或分享链接。此前GitHub Windows x64/x86构建记录保留，但不代替系统安装、真实应用和长时验收。
 
 TransInput 面向中文用户：本地完成中文输入，可选使用 DeepSeek 将当前中文翻译成自然、准确的美式英语，并选择中文、英文或双语上屏。
 
-本目录为新一代独立项目，包含新写源码、测试、实施文档和图标。当前电脑安装的 0.17.4.6 仍属于原来的 Weasel / Rime 实现；本轮未替换其代码、配置、进程或安装包。旧版测试结果不代表新架构通过验收。
+本目录为独立项目，包含自写引擎、测试、文档和图标。用户于2026-10-23要求移除旧版，原Weasel/Rime 0.17.4.6及旧安装残留已卸载；微软拼音保留。DeepSeek配置已在本机迁移为新版DPAPI密文，旧个人数据有加密备份。**新版仍未注册为系统输入法**，当前缺少受信任代码签名，不能把预览或迁移配置当作安装成功。最新状态见 [迁移与清理记录](docs/testing/2026-10-23-private-migration.md)。
 
 ## 已确定的方向
 
 | 项目 | 决定 |
 | --- | --- |
 | 项目名称 | TransInput |
-| 开源身份 | 用户个人 GitHub 账号 [jihongit](https://github.com/jihongit)；独立公开仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput) |
+| 项目归属 | 用户个人 GitHub 账号 [jihongit](https://github.com/jihongit)；[jihongit/TransInput](https://github.com/jihongit/TransInput) 暂为私有，验收并明确批准后才公开 |
 | 产品范围 | Windows 首版；架构同时考虑 macOS、Android、iOS / iPadOS |
 | 自研范围 | 输入引擎、平台接入、候选与翻译交互自主实现，不嵌入 Weasel、librime、Mozc、Fcitx 等现成输入法引擎 |
 | 允许复用 | 官方平台 SDK、通用基础库与 UI 框架、授权明确的开源词库；逐项核对许可 |
@@ -82,7 +80,7 @@ TransInput 面向中文用户：本地完成中文输入，可选使用 DeepSeek
 - 已接入候选UI的宿主显示协商与UI Automation提供程序，含选择/提交/取消、名称/坐标/状态、旧对象失效、模块寿命和显示关闭事件。已嵌入自写黑白输入指示和版本资源，原彩色图标不变。组件测试不代表严格UILess、实际读屏或其他应用验收通过。
 - 已生成带哈希/清单/许可的Windows开发预览ZIP，并准备独立白名单源码导出和发布脚本；未签名版本不能输出正式发行包，开发注册入口拒绝系统变更。详见交付报告。
 - 尚未完成：任意混写片段整句、完整标点与混输扩展、正式输入质量与宿主隐私兼容验证；候选窗和托盘设置的完整桌面交互、DPI / 深浅色 / 无障碍仍待验收。当前排序按最近选择优先，并非纯频次算法。
-- 已公开独立源码，并启用私密漏洞报告；GitHub Windows x64/x86首次构建与控制台检查通过。未执行：正式系统安装/升级/卸载、记事本 / 浏览器 / Office 等真实键盘操作验收、8小时资源测试、正式发行安装包和Apple/手机图标资源。
+- 源码已同步到私有验收仓库；未来对外开放另行取得用户批准。历史GitHub Windows x64/x86构建与控制台检查通过。尚未完成新版正式系统安装/升级/卸载、记事本/浏览器/Office真实输入验收、8小时资源测试、正式发行安装包和Apple/手机资源。
 
 当前完成的是隔离原型验证，P1 的真实宿主验收仍未完成。桌面自动化运行环境报 Windows 登录权限错误 1385，已记录为阻塞项。不要把后台集成测试或可编译 DLL 当作已交付的日常输入法。后续按 [实施路线](docs/ROADMAP.md) 继续。
 
