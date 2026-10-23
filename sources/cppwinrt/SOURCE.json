@@ -1,0 +1,12 @@
+{
+  "component": "Microsoft C++/WinRT",
+  "use": "Windows.Data.Json projection headers for OS JSON serialization and parsing",
+  "sdk_version": "10.0.26100.0",
+  "header_version": "2.0.250303.1",
+  "license": "MIT",
+  "license_url": "https://raw.githubusercontent.com/microsoft/cppwinrt/master/LICENSE",
+  "license_sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+  "verified_date": "2026-10-21",
+  "modified": false,
+  "distribution": "Generated inline projection code compiles into native translator/test executables. Preserve LICENSE and Microsoft copyright. Windows SDK and WinRT OS binaries are not bundled. License URL is a retrieval reference; the exact license bytes are retained and hashed."
+}

@@ -1,0 +1,23 @@
+# Fixed mixed spelling; expected text must occur within the first nine candidates.
+zhongg	中国	9
+zhguo	中国	9
+beij	北京	9
+bjing	北京	9
+shuruf	输入法	9
+shurfa	输入法	9
+srufa	输入法	9
+srfa	输入法	9
+rengongzn	人工智能	9
+rgongzhineng	人工智能	9
+diann	电脑	9
+dnao	电脑	9
+jint	今天	9
+jtian	今天	9
+meigx	没关系	9
+mguanxi	没关系	9
+duibq	对不起	9
+dbuqi	对不起	9
+zhong'guo'r	中国人	9
+z'guo	中国	9
+shu'ru'f	输入法	9
+ni'h	你好	9

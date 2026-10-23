@@ -1,0 +1,24 @@
+{
+  "name": "rime-pinyin-simp word data",
+  "repository": "https://github.com/rime/rime-pinyin-simp",
+  "commit": "0c6861ef7420ee780270ca6d993d18d4101049d0",
+  "file": "pinyin_simp.dict.yaml",
+  "download_url": "https://raw.githubusercontent.com/rime/rime-pinyin-simp/0c6861ef7420ee780270ca6d993d18d4101049d0/pinyin_simp.dict.yaml",
+  "license": "Apache-2.0",
+  "source_bytes": 1266216,
+  "source_sha256": "e341598343a0f0f2035bb1aafc34a7f3bb7887deeecb3f60796262aaa2983e6b",
+  "computed_git_blob_sha1": "6f2e996d2792416cb7f41bb49967a1dec7060c92",
+  "rows": 65125,
+  "converted_file": "crates/transinput-core/data/base.tsv",
+  "converted_sha256": "288972b2014f16cd333c52e536608801ee327e50252f5f3c06677520ed8a8401",
+  "conversion": "Remove the fixed YAML metadata header, validate every data row, retain all word/pinyin/integer-frequency rows in their original order, emit UTF-8 without BOM and LF newlines with a source/license header. No engine or Rime configuration is imported.",
+  "provenance": {
+    "upstream_header": "Derived from android open source project: platform/packages/inputmethods/PinyinIME.git",
+    "aosp_notice_commit": "49aebad1c1cfbbcaa9288ffed5161e79e57c3679",
+    "aosp_notice_url": "https://android.googlesource.com/platform/packages/inputmethods/PinyinIME/+/49aebad1c1cfbbcaa9288ffed5161e79e57c3679/NOTICE",
+    "aosp_notice_sha256": "b5830d96fb5a7e7e7ebcc295f352846b4b998e78fdc8f9aa68e134d2e4b39986",
+    "repository_license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "reviewed_on": "2026-10-21",
+  "scope": "A basic word-data baseline for the Rust core. Not a complete modern Chinese corpus or a claim of everyday input quality. Attribution and license texts must accompany distribution."
+}

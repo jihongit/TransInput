@@ -1,0 +1,35 @@
+name: 问题反馈
+description: 使用固定虚构文本描述可复现的问题。
+title: '[问题] '
+body:
+  - type: markdown
+    attributes:
+      value: 请只提供复现所需的信息，避免填写 API Key、授权头、真实输入和个人词库。安全问题先阅读 SECURITY.md。
+  - type: input
+    id: version
+    attributes:
+      label: TransInput 版本或源码检查点
+      placeholder: 版本号、提交号，或测试报告中的检查点
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 系统与应用
+      description: Windows 版本、x64/x86、出问题的应用及版本；显示问题再补充缩放和显示器情况。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 用不含敏感信息的固定示例说明按键、焦点和操作顺序。
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: 实际表现与预期
+      description: 说明丢字、重复、候选、卡顿或错误提示；无法稳定复现也请注明。
+    validations:
+      required: true

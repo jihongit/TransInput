@@ -1,0 +1,10 @@
+* text=auto
+*.cmd text eol=crlf
+# Keep audited upstream bytes and generated data unchanged on Windows checkout.
+/sources/pinyin-simp/** -text
+/sources/dictionary-audit/** -text
+/sources/rust-runtime/** -text
+/sources/cppwinrt/** -text
+/crates/transinput-core/data/** -text
+*.png binary
+*.ico binary

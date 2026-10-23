@@ -1,0 +1,43 @@
+# Fixed fictional input cases: pinyin<TAB>expected candidate<TAB>maximum rank.
+# Words come from the separately licensed bundled dictionary. This is a
+# regression baseline, not a claim of general daily-use quality.
+nihao	你好	1
+zhongwen	中文	1
+shurufa	输入法	1
+fanyi	翻译	1
+xiexie	谢谢	1
+beijing	北京	1
+shanghai	上海	1
+jintian	今天	1
+mingtian	明天	1
+diannao	电脑	1
+gongzuo	工作	1
+keyi	可以	1
+xianzai	现在	1
+shenme	什么	1
+women	我们	1
+ceshi	测试	1
+qingwen	请问	1
+meiguanxi	没关系	1
+duibuqi	对不起	1
+zaoshanghao	早上好	1
+woshizhongguoren	我是中国人	1
+nihaoshijie	你好世界	1
+nh	你好	1
+nhm	你好吗	1
+srf	输入法	1
+rgzn	人工智能	1
+zg	中国	3
+bj	北京	3
+dn	电脑	3
+mgx	没关系	3
+dbq	对不起	3
+zsh	早上好	9
+dsj	电视机	3
+xj	新疆	9
+zhongg	中国	1
+xiex	谢谢	1
+sh	是	1
+ni'hao	你好	1
+xi'an	西安	1
+bei'jing	北京	1

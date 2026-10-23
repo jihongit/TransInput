@@ -1,0 +1,27 @@
+# Authored functional test vocabulary. No external dictionary has been imported.
+你	ni	10000
+呢	ni	100
+泥	ni	50
+好	hao	10000
+号	hao	200
+你好	ni hao	20000
+你们	ni men	10000
+们	men	10000
+世界	shi jie	10000
+你好世界	ni hao shi jie	30000
+中国	zhong guo	20000
+中文	zhong wen	20000
+中	zhong	5000
+文	wen	5000
+测试	ce shi	20000
+输入法	shu ru fa	20000
+翻译	fan yi	20000
+谢谢	xie xie	20000
+再见	zai jian	10000
+我	wo	10000
+我们	wo men	20000
+是	shi	20000
+的	de	30000
+今天	jin tian	20000
+明天	ming tian	10000
+可以	ke yi	20000

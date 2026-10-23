@@ -1,0 +1,4 @@
+LIBRARY "TransInputPrototypeTest"
+EXPORTS
+    DllCanUnloadNow PRIVATE
+    DllGetClassObject PRIVATE

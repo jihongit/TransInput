@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Windows console checks
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  console:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned local Rust toolchain
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-rust.ps1
+      - name: Verify dictionary provenance and conversion
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-dictionary.ps1 -VerifyOnly
+      - name: Check and build Rust
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($tiAction in @('fmt','check','test','build')) {
+            & cmd.exe /d /c scripts\msvc.cmd '${{ matrix.arch }}' cargo $tiAction
+            if ($LASTEXITCODE -ne 0) { throw "Rust $tiAction failed: $LASTEXITCODE" }
+          }
+      - name: Build native components with strict warnings
+        run: |
+          & cmd.exe /d /c scripts\msvc.cmd '${{ matrix.arch }}' native
+          if ($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
+      - name: Run console and protocol checks
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tiNative = Join-Path (Get-Location) 'build\${{ matrix.arch }}'
+          $tiRust = if ('${{ matrix.arch }}' -eq 'x86') { 'target\i686-pc-windows-msvc\release' } else { 'target\release' }
+          $tiCore = (Resolve-Path (Join-Path $tiRust 'transinput_core.dll')).Path
+          $tiCases = @(
+            @{file='abi-smoke.exe'; args=@($tiCore)},
+            @{file='learning-smoke.exe'; args=@($tiCore)},
+            @{file='words-smoke.exe'; args=@($tiCore)},
+            @{file='translation-smoke.exe'; args=@($tiCore)},
+            @{file='translator-process.exe'; args=@((Join-Path $tiNative 'TransInputTranslator.exe'))},
+            @{file='broker-smoke.exe'; args=@((Join-Path $tiNative 'TransInputBroker.exe'))},
+            @{file='ui-element-smoke.exe'; args=@()},
+            @{file='accessibility-smoke.exe'; args=@()},
+            @{file='TransInputPreflight.exe'; args=@('--self-check')},
+            @{file='TransInputRegister.exe'; args=@('--self-check')},
+            @{file='tsf-lifecycle.exe'; args=@((Join-Path $tiNative 'TransInputPrototype.dll'))},
+            @{file='tsf-lifecycle.exe'; args=@((Join-Path $tiNative 'TransInputPrototypeTest.dll'))}
+          )
+          foreach ($tiCase in $tiCases) {
+            Write-Output "RUN $($tiCase.file)"
+            $tiArguments = $tiCase.args
+            & (Join-Path $tiNative $tiCase.file) @tiArguments
+            if ($LASTEXITCODE -ne 0) { throw "$($tiCase.file) failed: $LASTEXITCODE" }
+          }
