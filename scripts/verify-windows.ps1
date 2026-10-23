@@ -74,6 +74,7 @@ foreach ($tiArch in $tiArchitectures) {
     Invoke-TiCheck "$tiArch-deployment-probe" (Join-Path $tiNative 'TransInputPreflight.exe') @('--probe',('"'+(Join-Path $tiNative 'TransInputPrototype.dll')+'"')) 10
     Invoke-TiCheck "$tiArch-registration-transaction" (Join-Path $tiNative 'TransInputRegister.exe') @('--self-check') 10
     Invoke-TiCheck "$tiArch-registration-plan" (Join-Path $tiNative 'TransInputRegister.exe') @('--plan') 10
+    Invoke-TiCheck "$tiArch-local-preview-boundaries" 'powershell.exe' @('-NoProfile','-File',('"'+$PSScriptRoot+'\test-local-preview.ps1"'),'-Architecture',$tiArch) 20
     Invoke-TiCheck "$tiArch-spelling-benchmark" (Join-Path $tiRust 'transinput-cli.exe') @('--benchmark-spelling') 30
     Invoke-TiCheck "$tiArch-settings-layout" (Join-Path $tiNative 'TransInputSettings.exe') @('--render-preview', ('"' + (Join-Path $tiEvidence "$tiArch-settings.png") + '"')) 10
     Invoke-TiCheck "$tiArch-learning-layout" (Join-Path $tiNative 'TransInputSettings.exe') @('--render-learning-preview', ('"' + (Join-Path $tiEvidence "$tiArch-learning-settings.png") + '"')) 10

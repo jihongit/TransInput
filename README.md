@@ -1,12 +1,12 @@
 # TransInput：独立输入法
 
-状态：已实现Rust核心、Windows TSF、中文输入与可选DeepSeek翻译；当前交付开发预览，尚未达到日常安装发行条件。更新日期：2026-10-23（Asia/Shanghai）。最新检查与阻塞见 [Windows交付记录](docs/DELIVERY.md)。
+状态：已实现Rust核心、Windows TSF、中文输入与可选DeepSeek翻译；当前已安装本机未签名验收版，正式发行尚未就绪。更新日期：2026-10-23（Asia/Shanghai）。最新检查与阻塞见 [Windows交付记录](docs/DELIVERY.md)。
 
 仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput) 当前为**私有验收仓库**，须登录授权账号访问。只有用户验收并明确同意后才可公开，不发布公开安装包或分享链接。此前GitHub Windows x64/x86构建记录保留，但不代替系统安装、真实应用和长时验收。
 
 TransInput 面向中文用户：本地完成中文输入，可选使用 DeepSeek 将当前中文翻译成自然、准确的美式英语，并选择中文、英文或双语上屏。
 
-本目录为独立项目，包含自写引擎、测试、文档和图标。用户于2026-10-23要求移除旧版，原Weasel/Rime 0.17.4.6及旧安装残留已卸载；微软拼音保留。DeepSeek配置已在本机迁移为新版DPAPI密文，旧个人数据有加密备份。**新版仍未注册为系统输入法**，当前缺少受信任代码签名，不能把预览或迁移配置当作安装成功。最新状态见 [迁移与清理记录](docs/testing/2026-10-23-private-migration.md)。
+本目录为独立项目，包含自写引擎、测试、文档和图标。用户于2026-10-23要求移除旧版，原Weasel/Rime 0.17.4.6及旧安装残留已卸载；微软拼音保留。DeepSeek配置已在本机迁移为新版DPAPI密文，旧个人数据有加密备份。**新版已按用户明确授权安装为本机未签名验收版**，两架构系统COM/TSF激活、停用/启用、卸载/重装通过，未设默认输入法；正式签名与真实应用验收仍有待完成。详见 [本机安装报告](docs/testing/2026-10-23-local-installation.md)。最新状态见 [迁移与清理记录](docs/testing/2026-10-23-private-migration.md)。
 
 ## 已确定的方向
 

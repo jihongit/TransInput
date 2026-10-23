@@ -1,39 +1,39 @@
-# Windows 安装准备与权限边界
+# Windows 本机验收版安装与维护
 
-核对：2026-10-23。已有部署诊断、签名部署助手与开发预览打包入口；仍没有经过实际安装验收的安装器，新版未进行持久系统注册、未切换默认输入法；旧版已按用户授权卸载。本文是实施条件，不是可立即执行的安装说明。最新状态见 [交付记录](DELIVERY.md)。
+更新：2026-10-23。用户明确批准未签名本机验收安装；当前已部署至 `C:\Program Files\TransInput\0.1.0-local-preview`，x64/x86系统COM/TSF激活、停用/启用、实际卸载器卸载与重装检查通过。微软拼音、DeepSeek密文配置和加密备份保留；未设默认、未创建开始菜单入口、未更改Windows防护/证书信任/公司策略。详见 [实际安装报告](testing/2026-10-23-local-installation.md)。
 
-后续用户已明确授权卸载旧版：旧版及其机器级注册/启动项、系统DLL和安装目录残留已移除，微软拼音保留；个人数据做当前用户DPAPI备份，DeepSeek配置迁移为新版密文。新版仍未持久注册/安装，不把旧版卸载成功或迁移配置当作新版安装成功。此次未创建/信任证书、修改安全策略或重启电脑。
+## 使用
 
-## 当前事实
+按Win＋空格选择TransInput；设置位于系统托盘（也可能在隐藏图标区）。现有DeepSeek配置继续使用，无须把Key发给维护者。“已安装的应用”中可找到TransInput本机验收版的卸载项。它仍是待实际应用验收的未签名测试版，不等于正式发行。
 
-- 公司电脑，用户只有当前登录账户权限，2026-10-22 确认只能使用这台电脑。构建、独立后台、设置原型与测试程序已能运行，没有修改系统策略或安装服务。
-- 隔离测试使用 `TF_RP_LOCALPROCESS` 和测试进程内类工厂；这只能证明本进程接入，不能证明当前账户能安装全局可选输入法。[RegisterProfile 官方参数](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfinputprocessorprofilemgr-registerprofile)
-- 新 DLL 的只读签名检查为 `NotSigned`。微软的第三方 IME 要求包含 TSF 接入和数字签名，正式兼容与分发需另行满足。[微软 IME 要求](https://learn.microsoft.com/en-us/windows/apps/develop/input/input-method-editors)
-- 桌面工具初始化错误 1385 阻止了真实软件操作验收；这不是已经证明的输入法安装权限错误，不能据此要求用户提升权限或修改公司策略。
+## 维护命令
 
-## 安装器待实施行为
+使用已有PowerShell 7，不需要另一个管理员账号；当前账户权限已由用户实测，不能将这一结果推广为所有电脑免管理员安装。安装器不请求RunAs或修改安全策略。
 
-### 已实现的底层部署助手
+```powershell
+# 只读核对
+& .\scripts\install-local-preview.ps1 -Action Verify
+# 停用或重新启用，不删除个人资料
+& .\scripts\install-local-preview.ps1 -Action Disable -AcceptUnsignedLocalPreview
+& .\scripts\install-local-preview.ps1 -Action Enable -AcceptUnsignedLocalPreview
+# 完整卸载本机验收版，保留个人配置和加密备份
+& .\scripts\install-local-preview.ps1 -Action Uninstall -AcceptUnsignedLocalPreview
+```
 
-`TransInputPreflight.exe --probe <TIP绝对路径>` 只读输出当前调用进程的签名/提升状态和COM键可打开性；`TransInputRegister.exe --plan` 输出操作清单，`--self-check` 在纯内存夹具中验证四个阶段失败的逆序回滚。以上入口均不安装输入法。
+安装目录内的 `maintenance\install-local-preview.ps1` 同样支持上述维护操作，已测试从该脚本执行完整卸载，包括移除自身文件。文件占用时不强制关闭其他应用，保留卸载记录以便重试。
 
-注册助手的写操作只允许受信任签名的助手与相邻TIP，且两者必须包含TransInput产品标识并位于Program Files的TransInput目录下。机器级操作另检查提升状态，不请求提权；当前开发构建不满足入口条件。代码具备自身COM类、官方RegisterProfile和Keyboard/UIElement类别注册，拒绝覆盖指向其他路径的同GUID，部分失败逆序撤销新建项目。用户启用/停用单列，不使用设置默认、清空输入法或系统账户标志。卸载不触碰个人数据。
+## 从独立源码准备本机验收安装
 
-这些实现不等同于安装、重复安装、升级/回滚或卸载已经通过：现有部署路径还需要签名、公司批准的安装器编排、跨架构事务和实际系统生命周期测试。不要直接调用写操作试装、手写HKCU映射替代兼容验证，或把工具进程的提升状态当作用户授予管理员安装权限。
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\verify-windows.ps1 -Architecture all -Scope all
+$package = & .\scripts\package-windows.ps1 -Channel preview | ConvertFrom-Json
+& .\scripts\install-local-preview.ps1 -Action Install -PackagePath $package.path -AcceptUnsignedLocalPreview
+```
 
-### 安装器编排与验收待办
+构建检查命令的ExecutionPolicy仅限该检查进程，不修改持久或公司策略；公司强制策略优先。实际安装/卸载使用已有PowerShell 7，不设置ExecutionPolicy。拒绝覆盖未知安装、注册或启动项；不能直接覆盖正在使用的版本目录升级。
 
-1. 使用独立版本目录与GUID，保留微软拼音；文件清单、架构、签名和校验和在操作前明确。旧版已按用户要求卸载，不再把它当作并存/回退前提。
-2. 先验证当前账户可行性。COM 类注册、TSF profile 和用户启用是不同步骤；不能将文件复制成功当作系统安装成功。
-3. TSF 注册使用官方 `RegisterProfile`；启用使用官方 `InstallLayoutOrTip`，保留既有默认输入法，不直接修改注册表强设默认。不使用清空全部输入法或系统账户范围的标志。[微软安装说明](https://learn.microsoft.com/en-us/windows/apps/develop/input/input-method-editor-requirements)、[InstallLayoutOrTip](https://learn.microsoft.com/en-us/windows/win32/tsf/installlayoutortip)
-4. 每步保存可回滚的本项目状态，记录实际返回码。若当前账户被拒绝，停止该安装路径并恢复已完成步骤；由公司允许的部署渠道解决，不尝试绕过。
-5. 不创建开始菜单入口，设置从托盘进入。旧版替换已明确授权，本次仅在内存处理Key并保存为新版DPAPI密文；其他个人词库只做加密备份，不批量上传/自动导入。
-6. 升级不覆盖正在被宿主加载的 DLL；卸载只处理本项目已记录的注册与文件，保留个人配置和未来学习数据，用户清理另有明确操作。
+## 保护条件与限制
 
-## 交付前验证
+独立local-preview入口必须显式确认、具有TransInput产品资源并位于固定受保护版本目录；原signed入口与release包继续要求可信签名。安装前后检查文件清单、哈希和重解析点，使用官方RegisterProfile/类别/InstallLayoutOrTip接口，失败仅回滚本项目。刚注册后的只读GetProfile核对最多追加两次新进程重试，注册写入和付费调用不重试。
 
-开发与故障测试先使用这台电脑上的独立进程和进程内 profile，不改系统注册。后续安装、重复安装、升级、回滚、重启、并存与卸载按公司允许的当前账户路径逐步验证；真实宿主验收受桌面工具限制时，可准备具体操作让用户协助少量代表性验收，不能将完整 QA 转交用户。至少覆盖记事本、Chromium / Electron、Office、x86 宿主、只读与密码框、多屏 DPI、切换焦点、后台崩溃及长时资源趋势。
-
-当前账户持久注册是否可行、签名方案、实际宿主测试均未完成。开发可继续推进核心、UI 与隔离故障测试；这些未完成项不能被“免管理员安装”的承诺替代。
-
-2026-10-22 已有 [本机原生编辑器测试入口](testing/INPUT_PAD.md)，用户代表性输入及修复后的窗口移动 / 调整大小反馈正常。它使用过程内 profile 与显式自身消息路由，不完成上述持久注册或全局键盘接入，也不要求增加管理员权限；不要把测试副本作为正式安装包分发。完整记录见 [原生编辑器报告](testing/2026-10-22-native-editor.md)。
+当前已验证系统注册/加载和本项目自身进程激活，尚不等同于记事本、Codex、浏览器、Office、读屏、多屏和重启的完整验收。桌面自动化仍受1385限制；未修改系统策略来绕过。
