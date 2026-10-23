@@ -107,6 +107,8 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     struct WindowDC {HWND window;HDC dc;explicit WindowDC(HWND value):window(value),dc(GetDC(value)){}~WindowDC(){if(dc)ReleaseDC(window,dc);}};
     HWND window{};
     HFONT font{};
+    HFONT footer_font{};
+    static constexpr int popup_width=460,row_height=28,footer_height=58,popup_height=5*row_height+footer_height;
     std::wstring preedit;
     std::vector<std::wstring> candidates;
     std::wstring english;
@@ -165,15 +167,15 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     RECT EnglishRect(int width)const noexcept{
         if(english.empty()||selected>=candidates.size())return {};
         const auto top=Px(8)+layout.Top(selected)-layout.Offset();
-        return {ChineseRight(width)+Px(24),std::max(Px(8),top+Px(4)),width-Px(16),std::min(Px(8)+layout.Viewport(),top+Px(48))};
+        return {ChineseRight(width)+Px(24),std::max(Px(8),top+Px(2)),width-Px(16),std::min(Px(8)+layout.Viewport(),top+Px(row_height-2))};
     }
     void MeasureLayout(HDC dc,RECT bounds){
-        layout.Set(std::vector<int>(candidates.size(),Px(52)),std::max(0,static_cast<int>(bounds.bottom)-Px(64)));
+        layout.Set(std::vector<int>(candidates.size(),Px(row_height)),std::max(0,static_cast<int>(bounds.bottom)-Px(footer_height)));
         layout.EnsureVisible(selected);
         if(selected<candidates.size()){const auto label=std::to_wstring(selected+1)+L". "+candidates[selected];SIZE extent{};GetTextExtentPoint32W(dc,label.data(),static_cast<int>(label.size()),&extent);selected_width=Px(16)+extent.cx;}
         RECT measure{0,0,std::max(1,static_cast<int>(bounds.right)-ChineseRight(bounds.right)-Px(40)),0};
         if(!english.empty())DrawTextW(dc,english.data(),static_cast<int>(english.size()),&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
-        english_layout.Set({std::max(1,static_cast<int>(measure.bottom))},Px(44));layout_dirty=false;
+        english_layout.Set({std::max(1,static_cast<int>(measure.bottom))},Px(row_height-4));layout_dirty=false;
     }
     void ScrollTo(int offset)noexcept{
         if(layout.ScrollTo(offset)){interaction.Changed();Refresh();}
@@ -188,23 +190,23 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
             const auto top=Px(8)+layout.Top(row)-layout.Offset();const auto height=layout.Height(row);
             if(top+height<=Px(8)||top>=Px(8)+layout.Viewport())continue;
             if(row==selected){RECT highlight{Px(8),top,bounds.right-Px(8),top+height};const auto brush=CreateSolidBrush(RGB(22,46,87));FillRect(dc,&highlight,brush);DeleteObject(brush);}
-            text={Px(16),top+Px(4),row==selected&&!english.empty()?ChineseRight(bounds.right):bounds.right-Px(16),top+height-Px(4)};
+            text={Px(16),top+Px(2),row==selected&&!english.empty()?ChineseRight(bounds.right):bounds.right-Px(16),top+height-Px(2)};
             SetTextColor(dc,row==selected?RGB(61,236,212):RGB(245,247,255));
             const auto label=std::to_wstring(row+1)+L". "+candidates[row];
             DrawTextW(dc,label.data(),static_cast<int>(label.size()),&text,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS);
             if(row==selected&&!english.empty()){
                 auto dash=text;dash.left=ChineseRight(bounds.right);dash.right=dash.left+Px(20);DrawTextW(dc,L"—",1,&dash,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
                 const auto clip=EnglishRect(bounds.right);const auto english_saved=SaveDC(dc);IntersectClipRect(dc,clip.left,clip.top,clip.right,clip.bottom);
-                const auto text_top=top+Px(4)+std::max(0,(Px(44)-english_layout.Content())/2)-english_layout.Offset();
+                const auto text_top=top+Px(2)+std::max(0,(Px(row_height-4)-english_layout.Content())/2)-english_layout.Offset();
                 RECT translated{clip.left,text_top,clip.right,text_top+english_layout.Content()};
                 SetTextColor(dc,RGB(219,231,247));DrawTextW(dc,english.data(),static_cast<int>(english.size()),&translated,DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);RestoreDC(dc,english_saved);
             }
         }
-        RestoreDC(dc,saved);SetTextColor(dc,RGB(160,177,205));
-        text={Px(16),bounds.bottom-Px(50),bounds.right-Px(16),bounds.bottom-Px(28)};
+        RestoreDC(dc,saved);SetTextColor(dc,RGB(160,177,205));SelectedFont footer(dc,footer_font);
+        text={Px(16),bounds.bottom-Px(44),bounds.right-Px(16),bounds.bottom-Px(25)};
         DrawTextW(dc,preedit.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
-        text={Px(16),bounds.bottom-Px(25),bounds.right-Px(16),bounds.bottom-Px(4)};
-        const auto hint=english_layout.MaxOffset()&&!english.empty()?L"英文区域滚轮可阅读全文 · "+status:status;
+        text={Px(16),bounds.bottom-Px(23),bounds.right-Px(16),bounds.bottom-Px(5)};
+        const auto hint=english_layout.MaxOffset()&&!english.empty()?L"滚轮查看英文 · "+status:status;
         DrawTextW(dc,hint.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
         AccessibilitySnapshot();
     }
@@ -216,6 +218,7 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         visible = false;
         if (window) { auto old = std::exchange(window, nullptr); DestroyWindow(old); }
         if (font) { DeleteObject(font); font = nullptr; }
+        if (footer_font) { DeleteObject(footer_font); footer_font = nullptr; }
     }
     void Hide() noexcept { visible = false;interaction.Cancel();ui.End();document.Reset();NativeHide(); }
     void Suspend() noexcept {interaction.Cancel();painted_generation=0;NativeHide();}
@@ -257,7 +260,7 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
             wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
             window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
-                candidate_class, L"TransInput", WS_POPUP, 0, 0, 760, 324,
+                candidate_class, L"TransInput", WS_POPUP, 0, 0, popup_width, popup_height,
                 owner, nullptr, module_handle, this);
             if (!window) return;
         }
@@ -265,21 +268,25 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         const UINT dpi = owner ? GetDpiForWindow(owner) : GetDpiForWindow(window);
         if (!font || font_dpi != dpi) {
             if (font) DeleteObject(font);
+            if (footer_font) DeleteObject(footer_font);
             font = CreateFontW(-MulDiv(16, static_cast<int>(dpi), 96), 0, 0, 0, FW_NORMAL,
                 FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
+            footer_font=CreateFontW(-MulDiv(13,static_cast<int>(dpi),96),0,0,0,FW_NORMAL,
+                FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei UI");
             font_dpi = dpi;
             layout_dirty=true;
         }
         MONITORINFO monitor{sizeof monitor};
         GetMonitorInfoW(MonitorFromRect(&caret, MONITOR_DEFAULTTONEAREST), &monitor);
-        const int width=std::min(Px(760),static_cast<int>(monitor.rcWork.right-monitor.rcWork.left));
+        const int width=std::min(Px(popup_width),static_cast<int>(monitor.rcWork.right-monitor.rcWork.left));
         WindowDC target(window);if(!target.dc)return;SelectedFont selected_font(target.dc,font);
         const int maximum=std::max(Px(100),static_cast<int>(monitor.rcWork.bottom-monitor.rcWork.top)-Px(12));
         RECT previous{};GetWindowRect(window,&previous);const bool was_visible=native_visible;
         // Five stable rows plus preedit/status. Neither candidate count nor a
         // long translation may resize the popup or change its native frame.
-        const int height=std::min(Px(324),maximum);RECT content_bounds{0,0,width,height};
+        const int height=std::min(Px(popup_height),maximum);RECT content_bounds{0,0,width,height};
         if(layout_dirty)MeasureLayout(target.dc,content_bounds);
         int x = std::clamp(caret.left, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
         const int gap = MulDiv(6, static_cast<int>(dpi), 96);
@@ -331,9 +338,13 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
                 if(message==WM_DESTROY)self->accessibility.Disconnect();
                 if(message==WM_MOUSEWHEEL){
                     POINT point{GET_X_LPARAM(lparam),GET_Y_LPARAM(lparam)};ScreenToClient(hwnd,&point);RECT bounds{};GetClientRect(hwnd,&bounds);const auto english_bounds=self->EnglishRect(bounds.right);
-                    const auto delta=GET_WHEEL_DELTA_WPARAM(wparam)*self->Px(32)/WHEEL_DELTA;
-                    if(!self->english.empty()&&PtInRect(&english_bounds,point)){if(self->english_layout.ScrollTo(self->english_layout.Offset()-delta)){self->interaction.Changed();self->Refresh();}}
-                    else self->ScrollTo(self->layout.Offset()-delta);
+                    const auto wheel=GET_WHEEL_DELTA_WPARAM(wparam);
+                    if(!self->english.empty()&&PtInRect(&english_bounds,point)){
+                        // Keep successive views overlapping: the compact English
+                        // viewport is shorter than the old 32-pixel wheel step.
+                        const auto step=std::min(self->Px(row_height-8),self->english_layout.Viewport());
+                        if(self->english_layout.ScrollTo(self->english_layout.Offset()-wheel*step/WHEEL_DELTA)){self->interaction.Changed();self->Refresh();}
+                    }else self->ScrollTo(self->layout.Offset()-wheel*self->Px(row_height)/WHEEL_DELTA);
                     return 0;
                 }
                 if(message==WM_VSCROLL){
@@ -1017,6 +1028,7 @@ public:
             RECT caret{100,100,101,124};view->Position(caret,owner);UpdateWindow(view->window);
             if(!view->native_visible)return E_FAIL;
             RECT bounds{};GetWindowRect(view->window,&bounds);
+            if(bounds.right-bounds.left!=view->Px(CandidateView::popup_width)||bounds.bottom-bounds.top!=view->Px(CandidateView::popup_height))return E_FAIL;
             if(bounds.right>GetSystemMetrics(SM_XVIRTUALSCREEN)&&bounds.bottom>GetSystemMetrics(SM_YVIRTUALSCREEN))return E_FAIL;
             for(unsigned i=0;i<32;++i){
                 const auto painted=view->paints;
@@ -1030,6 +1042,16 @@ public:
                 if(view->HitTest(chinese_point)!=view->selected)return E_FAIL;
                 const auto english_rect=view->EnglishRect(bounds.right-bounds.left);
                 if(view->HitTest(MAKELPARAM(english_rect.left+1,english_rect.top+1))!=english_target)return E_FAIL;
+                // A click in the compact footer or below the fifth visible row
+                // must not select an invisible Chinese candidate or English.
+                if(view->HitTest(MAKELPARAM(view->Px(24),view->Px(8)+view->layout.Viewport()+1)))return E_FAIL;
+                if(view->layout.Viewport()!=view->Px(5*CandidateView::row_height))return E_FAIL;
+                if(!view->english.empty()&&view->english_layout.MaxOffset()){
+                    const auto before=view->english_layout.Offset();POINT point{english_rect.left+1,english_rect.top+1};ClientToScreen(view->window,&point);
+                    SendMessageW(view->window,WM_MOUSEWHEEL,MAKEWPARAM(0,static_cast<WORD>(-WHEEL_DELTA)),MAKELPARAM(point.x,point.y));UpdateWindow(view->window);
+                    if(view->english_layout.Offset()<=before||view->english_layout.Offset()-before>view->english_layout.Viewport())return E_FAIL;
+                    GetWindowRect(view->window,&translated);if(!EqualRect(&bounds,&translated))return E_FAIL;
+                }
             }
             *placements=view->placements;*paints=view->paints;
             if(view->placements!=1||view->shows!=1||view->hides||view->paints<33)return E_FAIL;
@@ -1090,6 +1112,7 @@ public:
         try{
             CandidateView view;view.font_dpi=dpi;
             view.font=CreateFontW(-view.Px(16),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
+            view.footer_font=CreateFontW(-view.Px(13),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
             if(!view.font)return E_FAIL;
             view.preedit=bottom?L"changyiwen":L"ns";view.status=L"↑↓ 选词 · 空格 / 数字 中文 · 点击英文 / Ctrl+Enter 英文";
             const std::wstring source=L"今天下午我们先核对这份虚构方案，确认后再安排明天的测试。";
@@ -1097,7 +1120,7 @@ public:
             for(unsigned i=0;i<8;++i)english+=L"Let's review this fictional proposal this afternoon and schedule tomorrow's test after everything is confirmed. ";
             english+=L"\r\nD:\\fictional\\"+std::wstring(180,L'x')+L"\\example.txt\r\nAll values are fictional. 😀";
             view.candidates={L"你是",L"鸟叔",L"那是",L"你说",source,L"女士",L"难受",L"年少",L"能说"};view.english=bottom?english:L"You are";view.selected=bottom?4:0;view.translation_mode=true;
-            const int width=view.Px(760),height=view.Px(324);RECT bounds{0,0,width,height};
+            const int width=view.Px(CandidateView::popup_width),height=view.Px(CandidateView::popup_height);RECT bounds{0,0,width,height};
             transinput::testing::PreviewBuffer buffer(width,height);if(!buffer.dc||!buffer.bitmap)return E_FAIL;
             view.Draw(buffer.dc,bounds);if(bottom)view.english_layout.ScrollTo(view.english_layout.MaxOffset());view.Draw(buffer.dc,bounds);
             *content=static_cast<uint32_t>(view.english_layout.Content());*maximum=static_cast<uint32_t>(view.english_layout.MaxOffset());
