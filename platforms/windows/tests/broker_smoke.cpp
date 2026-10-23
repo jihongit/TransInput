@@ -47,13 +47,27 @@ struct ControlFiles {
     }
     ~ControlFiles(){DeleteFileW(path.c_str());DeleteFileW((path+L".settings").c_str());RemoveDirectoryW(root.c_str());}
 };
+learning_control::Result ControlReady(const Server& server){
+    const auto deadline=GetTickCount64()+3000;
+    for(;;){
+        const auto state=learning_control::Query(server.endpoint,server.executable,nullptr,wire::LearningStatus,0,false,server.pid);
+        const bool loading=!state.status&&state.view.health==0;
+        const bool transient=state.status==ERROR_TIMEOUT||state.status==WAIT_TIMEOUT||state.status==ERROR_SEM_TIMEOUT||state.status==ERROR_PIPE_BUSY||state.status==ERROR_PIPE_NOT_CONNECTED||state.status==ERROR_BROKEN_PIPE||state.status==ERROR_NO_DATA;
+        if((!loading&&!transient)||GetTickCount64()>=deadline)return state;
+        // Only a read-only status query is replayed. The initial readiness
+        // connection can precede completion of cold profile loading on CI.
+        Sleep(10);
+    }
+}
 void Controls(const std::wstring& executable){
     using namespace learning_control;ControlFiles files;
     {
-        Server server(executable,0,0,0,files.path);
-        auto state=Query(server.endpoint,server.executable,nullptr,wire::LearningStatus,0,false,server.pid);
-        const auto deadline=GetTickCount64()+2000;
-        while(!state.status&&state.view.health==0&&GetTickCount64()<deadline){Sleep(10);state=Query(server.endpoint,server.executable,nullptr,wire::LearningStatus,0,false,server.pid);}
+        // Force the cold-readiness window instead of relying on CI load to
+        // expose it. Candidate workers are already available, control/profile
+        // loading is deliberately delayed; status reads must wait boundedly.
+        Server server(executable,0,0,650,files.path);
+        auto state=ControlReady(server);
+        if(state.status||state.view.enabled!=1||state.view.count||state.view.health!=2)std::fprintf(stderr,"initial control status=%lu health=%u enabled=%u count=%u\n",state.status,state.view.health,state.view.enabled,state.view.count);
         Require(!state.status&&state.view.enabled==1&&state.view.count==0&&state.view.health==2,"initial control IPC status");
         Require(!RecordSelection(server.endpoint,server.executable,nullptr,8,1,500,"bj","北京",server.pid).status,"control fixture record");
         state=Change(server.endpoint,server.executable,nullptr,wire::LearningEnable,10,false,server.pid);
@@ -73,15 +87,13 @@ void Controls(const std::wstring& executable){
         server.Close();
     }
     {
-        Server restored(executable,0,0,0,files.path);auto state=Query(restored.endpoint,restored.executable,nullptr,wire::LearningStatus,0,false,restored.pid);
-        const auto deadline=GetTickCount64()+2000;while(!state.status&&state.view.health==0&&GetTickCount64()<deadline){Sleep(10);state=Query(restored.endpoint,restored.executable,nullptr,wire::LearningStatus,0,false,restored.pid);}
+        Server restored(executable,0,0,0,files.path);auto state=ControlReady(restored);
         Require(!state.status&&state.view.count==1&&state.view.enabled==1,"clear/relearn restart state");
         state=Change(restored.endpoint,restored.executable,nullptr,wire::LearningEnable,13,false,restored.pid);
         Require(!state.status&&state.view.state==Succeeded,"persistent disable");restored.Close();
     }
     {
-        Server restored(executable,0,0,0,files.path);auto state=Query(restored.endpoint,restored.executable,nullptr,wire::LearningStatus,0,false,restored.pid);
-        const auto deadline=GetTickCount64()+2000;while(!state.status&&state.view.health==0&&GetTickCount64()<deadline){Sleep(10);state=Query(restored.endpoint,restored.executable,nullptr,wire::LearningStatus,0,false,restored.pid);}
+        Server restored(executable,0,0,0,files.path);auto state=ControlReady(restored);
         Require(!state.status&&state.view.count==1&&state.view.enabled==0,"disabled preference failed restart");restored.Close();
     }
 }
