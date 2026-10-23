@@ -72,4 +72,4 @@ Windows 后台输出为 `TransInputBroker.exe` 与独立 `TransInputTranslator.e
 
 完整回归后，`scripts\package-windows.ps1 -Channel preview` 生成Windows开发预览ZIP和SHA256，校验同一轮x64/x86、源码与二进制哈希。它不会安装；`release`仍受签名和实际宿主验收门槛限制。`scripts\export-source.ps1` 只导出独立项目白名单，排除父工程、工具链、构建和个人数据，并拒绝目录链接及已知密钥模式。导出不是所有潜在秘密都不存在的保证，发布前仍审查清单。
 
-GitHub已完成本机授权后才运行 `scripts\publish-github.ps1 -SourceDirectory <最新独立导出路径>`。脚本核对账号jihongit、导出哈希和空远端，不覆盖已有历史；它不执行正式发行。全部PowerShell命令的ExecutionPolicy参数仅影响调用进程，不修改系统策略。
+`scripts\publish-github.ps1 -SourceDirectory <最新独立导出路径>` 仅用于初次建立空远端，已于2026-10-23执行完成。仓库已有历史后会主动拒绝再次初始化；后续请克隆并通过正常Git提交/分支维护，不使用强制推送。该脚本不执行正式发行。全部PowerShell命令的ExecutionPolicy参数仅影响调用进程，不修改系统策略。
