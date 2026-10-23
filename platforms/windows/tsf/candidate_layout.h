@@ -23,6 +23,7 @@ public:
     int Offset()const noexcept{return offset_;}
     int MaxOffset()const noexcept{return std::max(0,content_-viewport_);}
     bool ScrollTo(int offset)noexcept{const auto next=std::clamp(offset,0,MaxOffset());const bool changed=offset_!=next;offset_=next;return changed;}
+    void EnsureVisible(size_t row)noexcept{const auto top=Top(row),bottom=top+Height(row);if(top<offset_)ScrollTo(top);else if(bottom>offset_+viewport_)ScrollTo(bottom-viewport_);}
     int Top(size_t row)const noexcept{int top{};for(size_t i=0;i<std::min(row,heights_.size());++i)top+=heights_[i];return top;}
     int Height(size_t row)const noexcept{return row<heights_.size()?heights_[row]:0;}
     std::optional<size_t> Hit(int y)const noexcept{

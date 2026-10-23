@@ -2,6 +2,7 @@
 // Independent TSF adapter. Candidate calculation is in an isolated Rust host.
 #define NOMINMAX
 #include <windows.h>
+#include <windowsx.h>
 #include <msctf.h>
 #include <wrl/client.h>
 #include <algorithm>
@@ -43,6 +44,7 @@ std::atomic<long> translation_channels{};
 constexpr wchar_t candidate_class[] = L"TransInput.Prototype.Candidate.40e2b4b8";
 constexpr size_t max_input = 128;
 constexpr size_t max_pending = 64;
+constexpr size_t english_target = 9;
 
 void TraceFailure(const char* stage, HRESULT result) noexcept {
 #ifdef TI_TEST_DIAGNOSTICS
@@ -107,6 +109,8 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     HFONT font{};
     std::wstring preedit;
     std::vector<std::wstring> candidates;
+    std::wstring english;
+    bool translation_mode{};
     size_t selected{};
     uint64_t session{};
     uint64_t revision{};
@@ -120,7 +124,8 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     bool layout_dirty{true};
     uint64_t painted_generation{};
     transinput::CandidateLayout layout;
-    int row_width{};
+    transinput::CandidateLayout english_layout;
+    int selected_width{};
     transinput::CandidateUiSession ui;
     ComPtr<ITfDocumentMgr> document;
     std::function<HRESULT(transinput::UiAction,size_t,uint64_t)> ui_action;
@@ -140,63 +145,66 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     void AccessibilitySnapshot()noexcept{
         if(!window||!native_visible||layout_dirty)return;
         try{RECT bounds{};if(!GetWindowRect(window,&bounds))return;std::vector<RECT> rows;rows.reserve(candidates.size());
-            for(size_t i=0;i<candidates.size();++i){const auto top=bounds.top+Px(44)+layout.Top(i)-layout.Offset();RECT row{bounds.left+Px(16),std::max(top,bounds.top+Px(44)),bounds.right-Px(16),std::min(top+layout.Height(i),bounds.bottom-Px(48))};if(IsRectEmpty(&row))row={};rows.push_back(row);}
-            accessibility.Update(window,bounds,candidates,std::move(rows),selected,interaction.Generation(),ui_action,&live_objects);
+            for(size_t i=0;i<candidates.size();++i){const auto top=bounds.top+Px(8)+layout.Top(i)-layout.Offset();RECT row{bounds.left+Px(16),std::max(top,bounds.top+Px(8)),i==selected&&!english.empty()?bounds.left+ChineseRight(bounds.right-bounds.left):bounds.right-Px(16),std::min(top+layout.Height(i),bounds.top+Px(8)+layout.Viewport())};if(IsRectEmpty(&row))row={};rows.push_back(row);}
+            auto names=candidates;const auto chinese_count=candidates.size();
+            if(!english.empty()&&selected<candidates.size()){names.push_back(english);auto translated=EnglishRect(bounds.right-bounds.left);OffsetRect(&translated,bounds.left,bounds.top);rows.push_back(translated);}
+            const auto callback=[action=ui_action,chinese_count](transinput::UiAction kind,size_t row,uint64_t generation){return action?action(kind,row==chinese_count?english_target:row,generation):CO_E_OBJNOTCONNECTED;};
+            accessibility.Update(window,bounds,std::move(names),std::move(rows),selected,interaction.Generation(),callback,&live_objects);
         }catch(...){/* Accessibility cannot fail a Chinese edit or painting. */}
     }
     void SyncUi(){
         const std::weak_ptr<CandidateView> weak=weak_from_this();
         const auto show=[weak](BOOL value){if(auto self=weak.lock()){if(!value)self->NativeHide();else if(self->visible)self->Position(self->last_caret,self->last_owner);}};
-        try{if(!ui.Publish(candidates,static_cast<UINT>(selected),interaction.Generation(),document.Get(),&live_objects,ui_action,show))NativeHide();}catch(...){ui.End();NativeHide();}
+        auto labels=candidates;if(!english.empty()&&selected<labels.size())labels[selected]+=L" — "+english;
+        try{if(!ui.Publish(std::move(labels),static_cast<UINT>(selected),interaction.Generation(),document.Get(),&live_objects,ui_action,show))NativeHide();}catch(...){ui.End();NativeHide();}
     }
 
     int Px(int value)const noexcept{return MulDiv(value,static_cast<int>(font_dpi?font_dpi:96),96);}
-    void ContentChanged()noexcept{interaction.Changed();layout_dirty=true;layout.Reset();}
-    std::vector<int> Measure(HDC dc,int width)const{
-        std::vector<int> heights;heights.reserve(candidates.size());
-        for(const auto& candidate:candidates){
-            RECT measure{0,0,std::max(1,width),0};
-            DrawTextW(dc,candidate.c_str(),static_cast<int>(candidate.size()),&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
-            heights.push_back(std::max(Px(32),static_cast<int>(measure.bottom-measure.top)+Px(10)));
-        }
-        return heights;
+    void ContentChanged()noexcept{interaction.Changed();layout_dirty=true;english_layout.Reset();}
+    int ChineseRight(int width)const noexcept{return std::max(Px(64),std::min(selected_width?selected_width:Px(230),width/3));}
+    RECT EnglishRect(int width)const noexcept{
+        if(english.empty()||selected>=candidates.size())return {};
+        const auto top=Px(8)+layout.Top(selected)-layout.Offset();
+        return {ChineseRight(width)+Px(24),std::max(Px(8),top+Px(4)),width-Px(16),std::min(Px(8)+layout.Viewport(),top+Px(48))};
     }
-    void ScrollInfo()const noexcept{
-        if(!window)return;
-        SCROLLINFO info{sizeof info,SIF_RANGE|SIF_PAGE|SIF_POS,0,std::max(0,layout.Content()-1),static_cast<UINT>(layout.Viewport()),layout.Offset(),0};
-        SCROLLINFO previous{sizeof previous,SIF_RANGE|SIF_PAGE|SIF_POS};
-        if(!GetScrollInfo(window,SB_VERT,&previous)||previous.nMin!=info.nMin||previous.nMax!=info.nMax||previous.nPage!=info.nPage||previous.nPos!=info.nPos)
-            SetScrollInfo(window,SB_VERT,&info,TRUE);
-        const bool shown=(GetWindowLongPtrW(window,GWL_STYLE)&WS_VSCROLL)!=0;
-        if(shown!=(layout.MaxOffset()>0))ShowScrollBar(window,SB_VERT,layout.MaxOffset()>0);
+    void MeasureLayout(HDC dc,RECT bounds){
+        layout.Set(std::vector<int>(candidates.size(),Px(52)),std::max(0,static_cast<int>(bounds.bottom)-Px(64)));
+        layout.EnsureVisible(selected);
+        if(selected<candidates.size()){const auto label=std::to_wstring(selected+1)+L". "+candidates[selected];SIZE extent{};GetTextExtentPoint32W(dc,label.data(),static_cast<int>(label.size()),&extent);selected_width=Px(16)+extent.cx;}
+        RECT measure{0,0,std::max(1,static_cast<int>(bounds.right)-ChineseRight(bounds.right)-Px(40)),0};
+        if(!english.empty())DrawTextW(dc,english.data(),static_cast<int>(english.size()),&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
+        english_layout.Set({std::max(1,static_cast<int>(measure.bottom))},Px(44));layout_dirty=false;
     }
     void ScrollTo(int offset)noexcept{
-        if(layout.ScrollTo(offset)){interaction.Changed();ScrollInfo();Refresh();}
+        if(layout.ScrollTo(offset)){interaction.Changed();Refresh();}
     }
     void Draw(HDC dc,RECT bounds){
         HBRUSH background=CreateSolidBrush(RGB(12,24,60));FillRect(dc,&bounds,background);DeleteObject(background);
         SelectedFont selected_font(dc,font);SetBkMode(dc,TRANSPARENT);
-        if(layout_dirty){
-            row_width=bounds.right-Px(64);
-            layout.Set(Measure(dc,row_width),std::max(0,static_cast<int>(bounds.bottom)-Px(92)));
-            layout_dirty=false;
-        }
-        SetTextColor(dc,RGB(61,236,212));RECT text{Px(16),Px(10),bounds.right-Px(16),Px(40)};
-        DrawTextW(dc,preedit.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
-        const int saved=SaveDC(dc);IntersectClipRect(dc,0,Px(44),bounds.right,std::max(Px(44),static_cast<int>(bounds.bottom)-Px(48)));
+        if(layout_dirty)MeasureLayout(dc,bounds);
+        RECT text{};
+        const int saved=SaveDC(dc);IntersectClipRect(dc,0,Px(8),bounds.right,Px(8)+layout.Viewport());
         for(size_t row=0;row<candidates.size();++row){
-            const auto top=Px(44)+layout.Top(row)-layout.Offset();const auto height=layout.Height(row);
-            if(top+height<=Px(44)||top>=bounds.bottom-Px(48))continue;
-            text={Px(16),top+Px(4),bounds.right-Px(16),top+height-Px(4)};
+            const auto top=Px(8)+layout.Top(row)-layout.Offset();const auto height=layout.Height(row);
+            if(top+height<=Px(8)||top>=Px(8)+layout.Viewport())continue;
+            if(row==selected){RECT highlight{Px(8),top,bounds.right-Px(8),top+height};const auto brush=CreateSolidBrush(RGB(22,46,87));FillRect(dc,&highlight,brush);DeleteObject(brush);}
+            text={Px(16),top+Px(4),row==selected&&!english.empty()?ChineseRight(bounds.right):bounds.right-Px(16),top+height-Px(4)};
             SetTextColor(dc,row==selected?RGB(61,236,212):RGB(245,247,255));
-            const wchar_t number[]{static_cast<wchar_t>(L'1'+row),L'\0'};
-            auto number_bounds=text;number_bounds.top=std::max(number_bounds.top,static_cast<LONG>(Px(48)));
-            DrawTextW(dc,number,1,&number_bounds,DT_SINGLELINE|DT_NOPREFIX);text.left=Px(48);text.right=std::min(text.right,text.left+row_width);
-            DrawTextW(dc,candidates[row].c_str(),static_cast<int>(candidates[row].size()),&text,DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
+            const auto label=std::to_wstring(row+1)+L". "+candidates[row];
+            DrawTextW(dc,label.data(),static_cast<int>(label.size()),&text,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS);
+            if(row==selected&&!english.empty()){
+                auto dash=text;dash.left=ChineseRight(bounds.right);dash.right=dash.left+Px(20);DrawTextW(dc,L"—",1,&dash,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
+                const auto clip=EnglishRect(bounds.right);const auto english_saved=SaveDC(dc);IntersectClipRect(dc,clip.left,clip.top,clip.right,clip.bottom);
+                const auto text_top=top+Px(4)+std::max(0,(Px(44)-english_layout.Content())/2)-english_layout.Offset();
+                RECT translated{clip.left,text_top,clip.right,text_top+english_layout.Content()};
+                SetTextColor(dc,RGB(219,231,247));DrawTextW(dc,english.data(),static_cast<int>(english.size()),&translated,DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);RestoreDC(dc,english_saved);
+            }
         }
         RestoreDC(dc,saved);SetTextColor(dc,RGB(160,177,205));
-        text={Px(16),bounds.bottom-Px(40),bounds.right-Px(16),bounds.bottom-Px(6)};
-        const auto hint=layout.MaxOffset()?L"滚轮查看完整内容 · "+status:status;
+        text={Px(16),bounds.bottom-Px(50),bounds.right-Px(16),bounds.bottom-Px(28)};
+        DrawTextW(dc,preedit.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
+        text={Px(16),bounds.bottom-Px(25),bounds.right-Px(16),bounds.bottom-Px(4)};
+        const auto hint=english_layout.MaxOffset()&&!english.empty()?L"英文区域滚轮可阅读全文 · "+status:status;
         DrawTextW(dc,hint.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
         AccessibilitySnapshot();
     }
@@ -229,8 +237,10 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         const auto px=[this](int value){return MulDiv(value,static_cast<int>(font_dpi),96);};
         const int x=static_cast<short>(LOWORD(point)),y=static_cast<short>(HIWORD(point));
         if(x<px(16)||x>=bounds.right-px(16))return {};
-        if(y>=bounds.bottom-px(48))return {};
-        return layout.Hit(y-px(44));
+        if(y<px(8)||y>=px(8)+layout.Viewport())return {};
+        const POINT point_client{x,y};const auto english_bounds=EnglishRect(bounds.right);
+        if(!english.empty()&&PtInRect(&english_bounds,point_client))return english_target;
+        return layout.Hit(y-px(8));
     }
     void Position(RECT caret, HWND owner) {
         last_caret=caret;last_owner=owner;
@@ -247,16 +257,15 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
             wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return;
             window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
-                candidate_class, L"TransInput Prototype", WS_POPUP|WS_VSCROLL, 0, 0, 420, 180,
+                candidate_class, L"TransInput", WS_POPUP, 0, 0, 760, 324,
                 owner, nullptr, module_handle, this);
             if (!window) return;
         }
         if(GetWindow(window,GW_OWNER)!=owner)SetWindowLongPtrW(window,GWLP_HWNDPARENT,reinterpret_cast<LONG_PTR>(owner));
         const UINT dpi = owner ? GetDpiForWindow(owner) : GetDpiForWindow(window);
-        const bool same_dpi=font_dpi==dpi;
         if (!font || font_dpi != dpi) {
             if (font) DeleteObject(font);
-            font = CreateFontW(-MulDiv(18, static_cast<int>(dpi), 96), 0, 0, 0, FW_NORMAL,
+            font = CreateFontW(-MulDiv(16, static_cast<int>(dpi), 96), 0, 0, 0, FW_NORMAL,
                 FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
             font_dpi = dpi;
@@ -264,18 +273,14 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         }
         MONITORINFO monitor{sizeof monitor};
         GetMonitorInfoW(MonitorFromRect(&caret, MONITOR_DEFAULTTONEAREST), &monitor);
-        const int width=std::min(Px(420),static_cast<int>(monitor.rcWork.right-monitor.rcWork.left));
+        const int width=std::min(Px(760),static_cast<int>(monitor.rcWork.right-monitor.rcWork.left));
         WindowDC target(window);if(!target.dc)return;SelectedFont selected_font(target.dc,font);
-        row_width=width-Px(64)-GetSystemMetricsForDpi(SM_CXVSCROLL,dpi);
-        auto heights=Measure(target.dc,row_width);
-        int content{};for(const auto height:heights)content+=height;
         const int maximum=std::max(Px(100),static_cast<int>(monitor.rcWork.bottom-monitor.rcWork.top)-Px(12));
         RECT previous{};GetWindowRect(window,&previous);const bool was_visible=native_visible;
-        // Waiting rows cannot be selected, but should not collapse and expand
-        // the popup on every keystroke. Reuse only its size, never old contents.
-        const int height=std::min(candidates.empty()&&was_visible&&same_dpi?
-            std::max(Px(100),static_cast<int>(previous.bottom-previous.top)):Px(100)+content,maximum);
-        layout.Set(std::move(heights),std::max(0,height-Px(92)));layout_dirty=false;
+        // Five stable rows plus preedit/status. Neither candidate count nor a
+        // long translation may resize the popup or change its native frame.
+        const int height=std::min(Px(324),maximum);RECT content_bounds{0,0,width,height};
+        if(layout_dirty)MeasureLayout(target.dc,content_bounds);
         int x = std::clamp(caret.left, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
         const int gap = MulDiv(6, static_cast<int>(dpi), 96);
         int y = caret.bottom + gap;
@@ -305,7 +310,6 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
 #endif
             NotifyWinEvent(EVENT_OBJECT_IME_SHOW,window,OBJID_CLIENT,CHILDID_SELF);accessibility.Show(&live_objects);}
         else if(moved||resized)NotifyWinEvent(EVENT_OBJECT_IME_CHANGE,window,OBJID_CLIENT,CHILDID_SELF);
-        ScrollInfo();
         if(!was_visible||resized)Refresh();
     }
     static LRESULT CALLBACK Procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
@@ -325,7 +329,13 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
                 if(message==WM_TIMER&&wparam==frame_timer){KillTimer(hwnd,frame_timer);self->pending_frame=false;InvalidateRect(hwnd,nullptr,FALSE);return 0;}
                 if(message==WM_GETOBJECT&&self->window==hwnd&&self->native_visible&&static_cast<LONG>(lparam)==UiaRootObjectId)return UiaReturnRawElementProvider(hwnd,wparam,lparam,self->accessibility.Root(&live_objects));
                 if(message==WM_DESTROY)self->accessibility.Disconnect();
-                if(message==WM_MOUSEWHEEL){self->ScrollTo(self->layout.Offset()-GET_WHEEL_DELTA_WPARAM(wparam)*self->Px(3*32)/WHEEL_DELTA);return 0;}
+                if(message==WM_MOUSEWHEEL){
+                    POINT point{GET_X_LPARAM(lparam),GET_Y_LPARAM(lparam)};ScreenToClient(hwnd,&point);RECT bounds{};GetClientRect(hwnd,&bounds);const auto english_bounds=self->EnglishRect(bounds.right);
+                    const auto delta=GET_WHEEL_DELTA_WPARAM(wparam)*self->Px(32)/WHEEL_DELTA;
+                    if(!self->english.empty()&&PtInRect(&english_bounds,point)){if(self->english_layout.ScrollTo(self->english_layout.Offset()-delta)){self->interaction.Changed();self->Refresh();}}
+                    else self->ScrollTo(self->layout.Offset()-delta);
+                    return 0;
+                }
                 if(message==WM_VSCROLL){
                     int offset=self->layout.Offset();SCROLLINFO info{sizeof info,SIF_TRACKPOS};
                     switch(LOWORD(wparam)){
@@ -385,7 +395,7 @@ struct Operation {
 };
 // Captured once at the physical key boundary; draining never rereads modifiers
 // or injects keys into the host. These are composition commands, not OS events.
-struct LogicalKey {WPARAM key{};wchar_t punctuation{};bool translation_enabled{};int page_direction{};wchar_t literal{};bool direct{};};
+struct LogicalKey {WPARAM key{};wchar_t punctuation{};bool translation_enabled{};int page_direction{};wchar_t literal{};bool direct{},english{};};
 struct ContextState {
     ComPtr<ITfContext> context;
     ComPtr<ITfComposition> composition;
@@ -409,6 +419,7 @@ struct ContextState {
     std::wstring translation_source,translation_output;
     uint32_t translation_status{1};
     bool translation_mode{};
+    bool scope_pending{};
     transinput::Scope scope{transinput::Scope::Unknown};
     std::function<bool(transinput::TranslationUpdate)> translate;
     std::function<bool(transinput::SelectionLearn)> learn;
@@ -490,15 +501,20 @@ void PositionCandidates(ContextState& state,TfEditCookie cookie){
     ComPtr<ITfContextView> context_view;HWND owner{};
     if(FAILED(state.context->GetActiveView(&context_view))||!context_view||FAILED(context_view->GetWnd(&owner))||!owner){state.view->Suspend();return;}
     if(state.window_events)state.window_events->Owner(owner);
-    TF_SELECTION selection{};ULONG fetched{};
-    const auto selection_result=state.context->GetSelection(cookie,TF_DEFAULT_SELECTION,1,&selection,&fetched);
-    ComPtr<ITfRange> anchor;anchor.Attach(selection.range);
-    // The candidate belongs at the active caret, not at the bounding rectangle
-    // of the complete (possibly wrapped) preedit. Never reuse old coordinates.
+    ComPtr<ITfRange> anchor;
+    const auto selection_result=state.composition->GetRange(&anchor);
+    // Keep the popup anchored to the beginning of this composition. Following
+    // every letter's moving caret made the whole candidate window jump/repaint.
     RECT caret{};BOOL clipped{};
-    if(FAILED(selection_result)||fetched!=1||!anchor||
-        FAILED(anchor->Collapse(cookie,selection.style.ase==TF_AE_START?TF_ANCHOR_START:TF_ANCHOR_END))){state.view->Suspend();return;}
-    const auto extent=context_view->GetTextExt(cookie,anchor.Get(),&caret,&clipped);
+    if(FAILED(selection_result)||!anchor||FAILED(anchor->Collapse(cookie,TF_ANCHOR_START))){state.view->Suspend();return;}
+    auto extent=context_view->GetTextExt(cookie,anchor.Get(),&caret,&clipped);
+    if(extent!=TS_E_NOLAYOUT&&(FAILED(extent)||clipped||caret.bottom<=caret.top)){
+        // If the composition start has scrolled out of view, use the visible
+        // active caret rather than leave the user without a candidate window.
+        TF_SELECTION selection{};ULONG fetched{};const auto result=state.context->GetSelection(cookie,TF_DEFAULT_SELECTION,1,&selection,&fetched);
+        ComPtr<ITfRange> fallback;fallback.Attach(selection.range);
+        if(SUCCEEDED(result)&&fetched==1&&fallback&&SUCCEEDED(fallback->Collapse(cookie,selection.style.ase==TF_AE_START?TF_ANCHOR_START:TF_ANCHOR_END)))extent=context_view->GetTextExt(cookie,fallback.Get(),&caret,&clipped);
+    }
     // A pending layout is normal immediately after editing in Chromium hosts.
     // Leave an already shown frame intact until OnLayoutChange supplies a new
     // caret; never show a new popup using guessed/previous coordinates.
@@ -520,7 +536,16 @@ public:
     HRESULT STDMETHODCALLTYPE DoEditSession(TfEditCookie cookie) override {
         if(state_->owner_thread!=GetCurrentThreadId())return RPC_E_WRONG_THREAD;
         struct Complete{ContextState& state;~Complete(){state.anchor_pending=false;}}complete{*state_};
-        try{PositionCandidates(*state_,cookie);return S_OK;}catch(...){if(state_->view)state_->view->Suspend();return E_FAIL;}
+        try{
+            if(state_->scope_pending&&state_->composition){
+                ComPtr<ITfRange> range;if(SUCCEEDED(state_->composition->GetRange(&range))&&range){
+                    const auto scope=transinput::ReadScope(state_->context.Get(),range.Get(),cookie);
+                    if(state_->scope!=transinput::Scope::Blocked)state_->scope=scope;
+                    state_->scope_pending=false;OfferTranslation(*state_);
+                }
+            }
+            PositionCandidates(*state_,cookie);return S_OK;
+        }catch(...){if(state_->view)state_->view->Suspend();return E_FAIL;}
     }
 };
 HRESULT ScheduleAnchor(const std::shared_ptr<ContextState>& state){
@@ -589,6 +614,7 @@ HRESULT EditOperation(ContextState& state, TfEditCookie cookie, const Operation&
             const auto scope=transinput::ReadScope(state.context.Get(),range.Get(),cookie);
             if(state.scope!=transinput::Scope::Blocked)state.scope=scope;
             if(state.scope!=transinput::Scope::Allowed&&!state.translation_source.empty())InvalidateTranslation(state);
+            state.scope_pending=false;
         }
         const auto& text = operation.text;
         HRESULT hr = range->SetText(cookie, 0, text.data(), static_cast<LONG>(text.size()));
@@ -774,29 +800,30 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         const auto old_session=view_->session,old_revision=view_->revision;
         const auto old_selected=view_->selected;
         const auto old_candidates=view_->candidates;
+        const auto old_english=view_->english;
+        const auto old_status=view_->status,old_preedit=view_->preedit;
         view_->session=state->session;view_->preedit=state->input;view_->selected=state->selected;
         view_->revision=state->revision;
         view_->candidates=state->candidate_source==state->input?state->candidates:std::vector<std::wstring>{};
         view_->status=state->unavailable?L"中文服务暂不可用，Enter 可保留拼音":
             (state->candidate_source==state->input?L"第 "+std::to_wstring(state->page+1)+L"/"+
                 std::to_wstring(std::max(1u,(state->candidate_total+8)/9))+L" 页 · PgUp/PgDn 翻页 · Enter 拼音":L"正在准备候选…");
-        if(TranslationMode(*state)&&!state->unavailable){
-            view_->selected=0;view_->candidates.clear();
-            if(state->candidate_source==state->input&&state->selected<state->candidates.size()){
-                const auto& chinese=state->candidates[state->selected];view_->candidates.push_back(chinese);
-                if(state->translation_status==4&&!state->translation_output.empty()){
-                    view_->candidates.push_back(state->translation_output);view_->candidates.push_back(chinese+L" - "+state->translation_output);
-                }
-            }
-            view_->status=state->translation_status==4?L"1 / 空格 中文 · 2 英文 · 3 双语 · ↑↓ 换词":
+        view_->translation_mode=TranslationMode(*state);view_->english.clear();
+        if(view_->translation_mode&&!state->unavailable){
+            if(state->translation_status==4&&state->candidate_source==state->input&&state->selected<state->candidates.size()&&
+                state->translation_source==state->candidates[state->selected])view_->english=state->translation_output;
+            view_->status=state->translation_status==4?L"↑↓ 选词 · 空格 / 数字 中文 · 点击英文 / Ctrl+Enter 英文":
                 state->translation_status==5?L"翻译暂不可用 · 空格选中文 · F5 重试":
                 state->scope==transinput::Scope::Unknown?L"正在检查输入框 · 空格选中文":
                 state->translation_status==0?L"翻译已关闭 · 空格选中文":L"正在翻译 · 空格可先选中文";
         }
         if(state->choice_request){view_->candidates.clear();view_->status=L"正在选词…";}
-        if(old_session!=view_->session||old_revision!=view_->revision||old_selected!=view_->selected||old_candidates!=view_->candidates)view_->ContentChanged();
+        const bool content_changed=old_session!=view_->session||old_revision!=view_->revision||old_selected!=view_->selected||old_candidates!=view_->candidates||old_english!=view_->english;
+        if(content_changed)view_->ContentChanged();
         view_->visible=!state->input.empty();if(!view_->visible)view_->Hide();else{
-            state->context->GetDocumentMgr(&view_->document);view_->Refresh();view_->SyncUi();
+            state->context->GetDocumentMgr(&view_->document);
+            if(content_changed||old_status!=view_->status||old_preedit!=view_->preedit)view_->Refresh();
+            if(content_changed)view_->SyncUi();
         }
     }
     HRESULT FromHostUi(transinput::UiAction action,size_t row,uint64_t generation){
@@ -804,14 +831,22 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(GetCurrentThreadId()!=owner_thread_)return RPC_E_WRONG_THREAD;
         if(!view_||!state_||!view_->visible||generation!=view_->interaction.Generation())return CO_E_OBJNOTCONNECTED;
         if(action==transinput::UiAction::Abort){Cancel();return S_OK;}
+        if(row==english_target){if(action==transinput::UiAction::Finalize)Choose(generation,row);return S_OK;}
         if(row>=view_->candidates.size())return E_INVALIDARG;
         if(action==transinput::UiAction::Finalize){Choose(generation,row);return S_OK;}
-        view_->selected=row;if(!TranslationMode(*state_)&&row<state_->candidates.size())state_->selected=row;view_->Refresh();return S_OK;
+        auto current=state_;TF_STATUS status{};if(FAILED(current->context->GetStatus(&status))||(status.dwDynamicFlags&TF_SD_READONLY))return S_OK;
+        if(current->selected==row)return S_OK;current->selected=row;
+        if(TranslationMode(*current)){InvalidateTranslation(*current);current->scope_pending=true;if(current->scope!=transinput::Scope::Blocked)current->scope=transinput::Scope::Unknown;}
+        Publish(current);ScheduleAnchor(current);return S_OK;
+    }
+    void Click(uint64_t generation,size_t row){
+        if(state_&&TranslationMode(*state_)&&row!=english_target){FromHostUi(transinput::UiAction::Select,row,generation);return;}
+        Choose(generation,row);
     }
     void Choose(uint64_t generation,size_t row){
         ComPtr<TextService> lifetime(this);
         if(!manager_||GetCurrentThreadId()!=owner_thread_||!state_||!view_||!view_->visible||
-            generation!=view_->interaction.Generation()||row>=view_->candidates.size())return;
+            generation!=view_->interaction.Generation()||(row!=english_target&&row>=view_->candidates.size()))return;
         auto current=state_;
         TF_STATUS status{};ComPtr<ITfDocumentMgr> focused,original;
         if(FAILED(current->context->GetStatus(&status))||(status.dwDynamicFlags&TF_SD_READONLY))return;
@@ -820,10 +855,14 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
             TraceFailure("candidate focus",FAILED(focus_result)?focus_result:FAILED(original_result)?original_result:E_UNEXPECTED);return;
         }
         if(state_!=current||!view_||!current->presentation_enabled||current->choice_request||current->input.empty()||current->candidate_source!=current->input||
-            current->session!=view_->session||current->revision!=view_->revision||generation!=view_->interaction.Generation()||row>=view_->candidates.size())return;
-        const auto text=view_->candidates[row];
+            current->session!=view_->session||current->revision!=view_->revision||generation!=view_->interaction.Generation())return;
+        const bool english=row==english_target;
+        if(english&&(!TranslationMode(*current)||current->scope!=transinput::Scope::Allowed||current->translation_status!=4||view_->english.empty()||
+            current->selected>=current->candidates.size()||current->translation_source!=current->candidates[current->selected]||view_->english!=current->translation_output))return;
+        if(!english&&row>=view_->candidates.size())return;
+        const auto text=english?view_->english:view_->candidates[row];
         Operation operation{OperationKind::Commit,text};
-        if(current->learn&&(!TranslationMode(*current)||row==0)){operation.learning_input=current->input;operation.learning_text=text;}
+        if(current->learn&&!english){operation.learning_input=current->input;operation.learning_text=text;}
         if(FAILED(Enqueue(current,std::move(operation))))return;
         InvalidateTranslation(*current);current->input.clear();current->cursor=0;current->selected=0;++current->revision;
         current->candidate_source.clear();current->candidates.clear();Publish(current);
@@ -944,6 +983,8 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         }
     }
     bool Eats(WPARAM key,LPARAM flags) const {
+        if(key==VK_RETURN&&state_&&!state_->input.empty()&&TranslationMode(*state_)&&(KeyState(VK_CONTROL)&0x8000)&&
+            !(KeyState(VK_SHIFT)&0x8000)&&!(KeyState(VK_MENU)&0x8000)&&!(KeyState(VK_LWIN)&0x8000)&&!(KeyState(VK_RWIN)&0x8000))return true;
         if (!manager_ || GetCurrentThreadId() != owner_thread_) return false;
         if ((KeyState(VK_CONTROL) & 0x8000) || (KeyState(VK_MENU) & 0x8000)
             || (KeyState(VK_LWIN) & 0x8000) || (KeyState(VK_RWIN) & 0x8000)) return false;
@@ -979,11 +1020,16 @@ public:
             if(bounds.right>GetSystemMetrics(SM_XVIRTUALSCREEN)&&bounds.bottom>GetSystemMetrics(SM_YVIRTUALSCREEN))return E_FAIL;
             for(unsigned i=0;i<32;++i){
                 const auto painted=view->paints;
-                view->preedit+=L'i';view->candidates.clear();view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
+                view->preedit+=L'i';view->candidates.clear();view->english.clear();view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
                 if(!view->pending_frame||view->paints!=painted||view->painted_generation==view->interaction.Generation())return E_FAIL;
                 RECT pending{};GetWindowRect(view->window,&pending);if(!EqualRect(&bounds,&pending))return E_FAIL;
-                view->candidates=rows;view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
+                view->candidates=i%3?rows:std::vector<std::wstring>{L"测试"};view->selected=std::min<size_t>(i%9,view->candidates.size()-1);view->english=i%2?L"You are":std::wstring(1000,L'A');view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
                 if(view->pending_frame||view->paints!=painted+1)return E_FAIL;
+                RECT translated{};GetWindowRect(view->window,&translated);if(!EqualRect(&bounds,&translated))return E_FAIL;
+                const auto chinese_point=MAKELPARAM(view->Px(24),view->Px(16)+view->layout.Top(view->selected)-view->layout.Offset());
+                if(view->HitTest(chinese_point)!=view->selected)return E_FAIL;
+                const auto english_rect=view->EnglishRect(bounds.right-bounds.left);
+                if(view->HitTest(MAKELPARAM(english_rect.left+1,english_rect.top+1))!=english_target)return E_FAIL;
             }
             *placements=view->placements;*paints=view->paints;
             if(view->placements!=1||view->shows!=1||view->hides||view->paints<33)return E_FAIL;
@@ -999,6 +1045,10 @@ public:
     HRESULT STDMETHODCALLTYPE SuppressWindow(BOOL suppress) override {
         if(!manager_||GetCurrentThreadId()!=owner_thread_||!view_)return E_UNEXPECTED;
         view_->suppress_window=suppress!=FALSE;if(view_->suppress_window)view_->Suspend();return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE TranslationState(BOOL* ready,uint32_t* selected) override {
+        if(!ready||!selected)return E_POINTER;if(GetCurrentThreadId()!=owner_thread_||!view_)return E_UNEXPECTED;
+        *ready=!view_->english.empty();*selected=static_cast<uint32_t>(view_->selected);return S_OK;
     }
     HRESULT STDMETHODCALLTYPE Key(ITfContext* context,uint32_t key,uint32_t modifiers,BOOL* eaten,double* elapsed) override {
         if(!eaten)return E_POINTER;*eaten=FALSE;if(elapsed)*elapsed=0;
@@ -1039,18 +1089,18 @@ public:
         if(!path||!content||!maximum||!(dpi==96||dpi==144||dpi==192))return E_INVALIDARG;
         try{
             CandidateView view;view.font_dpi=dpi;
-            view.font=CreateFontW(-view.Px(18),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
+            view.font=CreateFontW(-view.Px(16),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
             if(!view.font)return E_FAIL;
-            view.preedit=L"changyiwen";view.status=L"1 中文 · 2 英文 · 3 双语";
+            view.preedit=bottom?L"changyiwen":L"ns";view.status=L"↑↓ 选词 · 空格 / 数字 中文 · 点击英文 / Ctrl+Enter 英文";
             const std::wstring source=L"今天下午我们先核对这份虚构方案，确认后再安排明天的测试。";
             std::wstring english;
             for(unsigned i=0;i<8;++i)english+=L"Let's review this fictional proposal this afternoon and schedule tomorrow's test after everything is confirmed. ";
             english+=L"\r\nD:\\fictional\\"+std::wstring(180,L'x')+L"\\example.txt\r\nAll values are fictional. 😀";
-            view.candidates={source,english,source+L" - "+english};
-            const int width=view.Px(420),height=view.Px(460);RECT bounds{0,0,width,height};
+            view.candidates={L"你是",L"鸟叔",L"那是",L"你说",source,L"女士",L"难受",L"年少",L"能说"};view.english=bottom?english:L"You are";view.selected=bottom?4:0;view.translation_mode=true;
+            const int width=view.Px(760),height=view.Px(324);RECT bounds{0,0,width,height};
             transinput::testing::PreviewBuffer buffer(width,height);if(!buffer.dc||!buffer.bitmap)return E_FAIL;
-            view.Draw(buffer.dc,bounds);if(bottom)view.layout.ScrollTo(view.layout.MaxOffset());view.Draw(buffer.dc,bounds);
-            *content=static_cast<uint32_t>(view.layout.Content());*maximum=static_cast<uint32_t>(view.layout.MaxOffset());
+            view.Draw(buffer.dc,bounds);if(bottom)view.english_layout.ScrollTo(view.english_layout.MaxOffset());view.Draw(buffer.dc,bounds);
+            *content=static_cast<uint32_t>(view.english_layout.Content());*maximum=static_cast<uint32_t>(view.english_layout.MaxOffset());
             return buffer.Save(path)?S_OK:E_FAIL;
         }catch(...){return E_FAIL;}
     }
@@ -1065,13 +1115,13 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Press(uint32_t row) override {
         if(GetCurrentThreadId()!=owner_thread_||!view_)return E_UNEXPECTED;
-        view_->interaction.Press(row<view_->candidates.size()?std::optional<size_t>{row}:std::nullopt);return S_OK;
+        view_->interaction.Press(row<view_->candidates.size()||(row==english_target&&!view_->english.empty())?std::optional<size_t>{row}:std::nullopt);return S_OK;
     }
     HRESULT STDMETHODCALLTYPE ReleasePress(uint32_t row) override {
         if(GetCurrentThreadId()!=owner_thread_||!view_)return E_UNEXPECTED;
         try{
-            const auto selected=view_->interaction.Release(row<view_->candidates.size()?std::optional<size_t>{row}:std::nullopt);
-            if(selected)Choose(view_->interaction.Generation(),*selected);return S_OK;
+            const auto selected=view_->interaction.Release(row<view_->candidates.size()||(row==english_target&&!view_->english.empty())?std::optional<size_t>{row}:std::nullopt);
+            if(selected)Click(view_->interaction.Generation(),*selected);return S_OK;
         }catch(...){return E_FAIL;}
     }
 #endif
@@ -1099,7 +1149,7 @@ public:
             view_ = std::make_shared<CandidateView>();
             choose_target_=std::make_shared<ChooseTarget>();choose_target_->owner=this;
             const std::weak_ptr<ChooseTarget> weak_choose=choose_target_;
-            view_->choose=[weak_choose](uint64_t generation,size_t row){if(auto target=weak_choose.lock();target&&target->owner)target->owner->Choose(generation,row);};
+            view_->choose=[weak_choose](uint64_t generation,size_t row){if(auto target=weak_choose.lock();target&&target->owner)target->owner->Click(generation,row);};
             view_->ui.Manager(manager);
             view_->ui_action=[weak_choose](transinput::UiAction action,size_t row,uint64_t generation)->HRESULT{if(auto target=weak_choose.lock();target&&target->owner)return target->owner->FromHostUi(action,row,generation);return CO_E_OBJNOTCONNECTED;};
             HRESULT hr = manager_.As(&keys_);
@@ -1177,6 +1227,7 @@ public:
         const auto key=event.key;
         try {
             auto& state = *current;
+            if(event.english){accepted=true;if(current==state_&&view_)Choose(view_->interaction.Generation(),english_target);return S_OK;}
             if(state.input.empty()){
                 if(event.direct||key<'A'||key>'Z'){
                     // A command accepted while the IME owned a composition
@@ -1255,21 +1306,17 @@ public:
             }
             else if (key == VK_RETURN) { kind = OperationKind::Commit; output = state.input; }
             else if (key == VK_SPACE || (key >= '1' && key <= '9')) {
-                const bool translating=TranslationMode(state);
-                const auto index = key == VK_SPACE || (translating&&key=='1') ? state.selected : static_cast<size_t>(key - '1');
-                if(translating&&key>='2'&&key<='9'){
-                    if((key=='2'||key=='3')&&state.translation_status==4&&!state.translation_output.empty()&&state.candidate_source==state.input&&state.selected<state.candidates.size()){
-                        kind=OperationKind::Commit;output=key=='2'?state.translation_output:state.candidates[state.selected]+L" - "+state.translation_output;
-                    }
-                }else if(state.candidate_source==state.input&&index<state.candidates.size()){
+                const auto index = key == VK_SPACE ? state.selected : static_cast<size_t>(key - '1');
+                if(state.candidate_source==state.input&&index<state.candidates.size()){
                     kind=OperationKind::Commit;output=state.candidates[index];chosen_chinese=output;chinese_choice=true;
-                }else if((key==VK_SPACE||key=='1')||(!translating&&state.candidate_source!=state.input)){
+                }else if((key==VK_SPACE||key=='1')||state.candidate_source!=state.input){
                     kind=OperationKind::Resolve;output=state.input;candidate=index;chinese_choice=true;
                 }
             }
             const bool text_changed=state.input!=rollback.input;
             if(text_changed){state.page=0;++state.revision;}
             const bool page_changed=state.page!=rollback.page;
+            const bool selected_changed=state.selected!=rollback.selected;
             if(page_changed&&!text_changed)++state.revision;
             if (kind == OperationKind::Update && state.input.empty()) kind = OperationKind::Cancel;
             if (kind == OperationKind::Update) output = state.input;
@@ -1281,7 +1328,8 @@ public:
             bool conditional=kind==OperationKind::Resolve&&!literal_boundary&&!punctuation&&key>='2'&&key<='9';
             prepared_operation.conditional=conditional;
             if(chinese_choice&&state.learn){prepared_operation.learning_input=state.input;prepared_operation.learning_text=std::move(chosen_chinese);}
-            try{hr=Enqueue(current,std::move(prepared_operation));}
+            const bool edit_needed=kind!=OperationKind::Update||text_changed||state.cursor!=rollback.cursor;
+            try{hr=edit_needed?Enqueue(current,std::move(prepared_operation)):S_OK;}
             catch(...){if(request)pending_commits_.erase(request);throw;}
             if(FAILED(hr)){if(request)pending_commits_.erase(request);return hr;}
             accepted=true;rollback.keep=true;
@@ -1304,9 +1352,11 @@ public:
                     state.candidate_source.clear();state.candidates.clear();
                     if(broker_)broker_->Submit(Job(current,false,next_request_++));
                 }
+                if(selected_changed&&TranslationMode(state)){InvalidateTranslation(state);state.scope_pending=true;if(state.scope!=transinput::Scope::Blocked)state.scope=transinput::Scope::Unknown;}
                 OfferTranslation(state);
             }
             Publish(current);
+            if(!edit_needed)ScheduleAnchor(current);
             return S_OK;
         } catch (...) { return accepted?S_OK:E_OUTOFMEMORY; }
     }
@@ -1328,7 +1378,7 @@ public:
             const bool composing=!current->input.empty();
             LogicalKey event{key,composing&&!direct?transinput::ComposingPunctuation(key,shift):wchar_t{},translator_&&translator_->Enabled(),
                 composing&&!direct?transinput::PageDirection(key,shift):0,
-                direct||key<'A'||key>'Z'?LiteralKey(key,flags):wchar_t{},direct};
+                direct||key<'A'||key>'Z'?LiteralKey(key,flags):wchar_t{},direct,key==VK_RETURN&&(KeyState(VK_CONTROL)&0x8000)!=0};
             if(!current->choice_request&&!current->deferred.empty())Drain(current);
             HRESULT hr{};
             if(current->choice_request||!current->deferred.empty()){

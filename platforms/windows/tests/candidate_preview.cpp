@@ -28,7 +28,7 @@ int wmain(int argc,wchar_t** argv){
         for(const uint32_t dpi:{96u,144u,192u})for(const BOOL bottom:{FALSE,TRUE}){
             const auto path=std::wstring(argv[2])+L"\\candidate-"+std::to_wstring(dpi)+(bottom?L"-bottom.png":L"-top.png");uint32_t content{},maximum{};
             const auto rendered=view->RenderPreview(path.c_str(),dpi,bottom,&content,&maximum);
-            if(FAILED(rendered)||maximum==0||content<=maximum){std::fprintf(stderr,"candidate preview failed: 0x%08lx\n",static_cast<unsigned long>(rendered));result=6;}
+            if(FAILED(rendered)||(bottom?(maximum==0||content<=maximum):maximum!=0)){std::fprintf(stderr,"candidate preview failed: 0x%08lx\n",static_cast<unsigned long>(rendered));result=6;}
             else std::printf("preview dpi=%u bottom=%d content=%u max_scroll=%u\n",dpi,bottom,content,maximum);
         }
         }
