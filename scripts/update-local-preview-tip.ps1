@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+﻿# SPDX-License-Identifier: AGPL-3.0-only
 [CmdletBinding()]
 param(
  [ValidateSet('Plan','Apply')][string]$Action='Plan',
@@ -70,6 +70,13 @@ $tiJournal=Owned-Path 'tip-update-journal.json'
 if(Test-Path -LiteralPath $tiJournal){throw 'An unfinished TIP update requires inspection'}
 function Save-Journal { $tiChanges|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $tiJournal -Encoding UTF8 }
 $tiBrandingAdded=@()
+$tiRestartNotice='输入法文件已更新。请保存内容，完全退出并重新打开正在使用的软件后生效；仅切换输入法或关闭文档不会保证加载新版。'
+$tiRestartProcesses=@(Get-Process|ForEach-Object {
+ $tiProcess=$_
+ try {foreach($tiModule in $tiProcess.Modules){if($tiModule.FileName.StartsWith($tiTarget+'\',[StringComparison]::OrdinalIgnoreCase) -and $tiModule.ModuleName -like 'TransInputPrototype*.dll'){
+  [pscustomobject]@{name=$tiProcess.ProcessName;pid=$tiProcess.Id;loaded_image_size=$tiModule.ModuleMemorySize};break
+ }}}catch{}
+})
 try {
  # Stage the verified TIP/helper pairs before changing any installed path. A loaded old
  # image is renamed, never truncated, deleted, or modified in a user process.
@@ -94,14 +101,15 @@ try {
   $tiEntry=$tiState.files|Where-Object {$_.path -ceq $tiChange.path};$tiEntry.sha256=$tiChange.new_hash
   $tiState.files+= [pscustomobject]@{path=$tiChange.backup;sha256=$tiChange.old_hash}
  }
- $tiUpdate=[ordered]@{installed_at=(Get-Date).ToString('o');verification=$tiCheckpoint.path;evidence=$tiEvidence;requires_app_restart=$true;components=@($tiChanges|Select-Object path,new_hash,backup)}
+ $tiUpdate=[ordered]@{installed_at=(Get-Date).ToString('o');verification=$tiCheckpoint.path;evidence=$tiEvidence;requires_app_restart=$true;restart_notice=$tiRestartNotice;processes_loaded_before_update=$tiRestartProcesses;application_reload_verified=$false;components=@($tiChanges|Select-Object path,new_hash,backup)}
  $tiState|Add-Member -NotePropertyName tip_update -NotePropertyValue $tiUpdate -Force
  $tiTemporary=Owned-Path 'local-preview-installation.pending.json'
  $tiState|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $tiTemporary -Encoding UTF8
  Move-Item -LiteralPath $tiTemporary -Destination $tiMarker -Force
  foreach($tiFile in $tiState.files){if((Hash (Owned-Path $tiFile.path)) -cne $tiFile.sha256){throw 'Post-update file verification failed'}}
  Remove-Item -LiteralPath $tiJournal
- [ordered]@{success=$true;updated_tip_architectures=@($tiChanges.architecture|Sort-Object -Unique);updated_components=@($tiChanges.path);branding_added=@($tiBrandingAdded);files_verified=@($tiState.files).Count;requires_app_restart=$true;other_installed_components_unchanged=$true;evidence=$tiEvidence}|ConvertTo-Json -Depth 5|Tee-Object (Join-Path $tiEvidence 'result.json')
+ Write-Warning $tiRestartNotice
+ [ordered]@{success=$true;updated_tip_architectures=@($tiChanges.architecture|Sort-Object -Unique);updated_components=@($tiChanges.path);branding_added=@($tiBrandingAdded);files_verified=@($tiState.files).Count;requires_app_restart=$true;restart_notice=$tiRestartNotice;processes_loaded_before_update=$tiRestartProcesses;application_reload_verified=$false;other_installed_components_unchanged=$true;evidence=$tiEvidence}|ConvertTo-Json -Depth 5|Tee-Object (Join-Path $tiEvidence 'result.json')
 } catch {
  $tiFailure=$_.Exception.Message;$tiRollback=@()
  foreach($tiArchitecture in $tiBrandingAdded){try{$tiHelper=Owned-Path ($tiArchitecture+'/TransInputRegister.exe');& $tiHelper --rollback-branding-local-preview --acknowledge-unsigned-local-preview *> (Join-Path $tiEvidence ($tiArchitecture+'-branding-rollback.txt'));if($LASTEXITCODE -ne 0){$tiRollback+='branding-'+$tiArchitecture}}catch{$tiRollback+='branding-'+$tiArchitecture}}

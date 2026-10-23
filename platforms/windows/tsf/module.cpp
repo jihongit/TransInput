@@ -1052,8 +1052,23 @@ public:
         try{
             {unsigned toggles{};ComPtr<transinput::LanguageButton> button;button.Attach(new transinput::LanguageButton(&live_objects,module_handle,[&](){++toggles;return S_OK;}));
                 TF_LANGBARITEMINFO info{};if(FAILED(button->GetInfo(&info))||info.guidItem!=GUID_LBI_INPUTMODE||info.clsidService!=transinput::ClassId)return E_FAIL;
-                BSTR text{};if(FAILED(button->GetText(&text)))return E_FAIL;const bool named=std::wstring_view(text,SysStringLen(text))==L"TI";SysFreeString(text);if(!named)return E_FAIL;
+                const auto named=[&](const wchar_t* expected){BSTR text{};if(FAILED(button->GetText(&text)))return false;const bool good=std::wstring_view(text,SysStringLen(text))==expected;SysFreeString(text);return good;};
+                if(!named(L"中"))return E_FAIL;
                 HICON icon{};if(FAILED(button->GetIcon(&icon))||!icon)return E_FAIL;DestroyIcon(icon);
+                struct Sink final:ITfLangBarItemSink {
+                    ULONG refs{1};DWORD flags{},calls{};
+                    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out)override{if(!out)return E_POINTER;*out=nullptr;if(id!=IID_IUnknown&&id!=IID_ITfLangBarItemSink)return E_NOINTERFACE;*out=static_cast<ITfLangBarItemSink*>(this);AddRef();return S_OK;}
+                    ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}
+                    ULONG STDMETHODCALLTYPE Release()override{const auto remaining=--refs;if(!remaining)delete this;return remaining;}
+                    HRESULT STDMETHODCALLTYPE OnUpdate(DWORD value)override{flags=value;++calls;return S_OK;}
+                };ComPtr<Sink> sink;sink.Attach(new Sink);
+                DWORD cookie{};if(FAILED(button->AdviseSink(IID_ITfLangBarItemSink,sink.Get(),&cookie)))return E_FAIL;
+                button->English(true);
+                if(!named(L"英")||sink->calls!=1||sink->flags!=(TF_LBI_ICON|TF_LBI_TEXT|TF_LBI_TOOLTIP))return E_FAIL;
+                if(FAILED(button->GetIcon(&icon))||!icon)return E_FAIL;DestroyIcon(icon);
+                button->English(true);if(sink->calls!=1)return E_FAIL;
+                button->English(false);if(!named(L"中")||sink->calls!=2)return E_FAIL;
+                if(FAILED(button->UnadviseSink(cookie))||sink->refs!=1)return E_FAIL;
                 if(FAILED(button->OnClick(TF_LBI_CLK_LEFT,{},nullptr))||toggles!=1)return E_FAIL;
                 button->Disconnect();if(button->OnClick(TF_LBI_CLK_LEFT,{},nullptr)!=CO_E_OBJNOTCONNECTED||toggles!=1)return E_FAIL;
             }

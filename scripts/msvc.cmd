@@ -134,6 +134,10 @@ cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT "%~dp0..\platforms\windows\resour
 if errorlevel 1 exit /b %errorlevel%
 "%TI_OUT%\generate-icon.exe" "%~dp0..\assets\branding\windows\input-indicator.ico"
 if errorlevel 1 exit /b %errorlevel%
+"%TI_OUT%\generate-icon.exe" "%~dp0..\assets\branding\windows\input-mode-chinese.ico" chinese
+if errorlevel 1 exit /b %errorlevel%
+"%TI_OUT%\generate-icon.exe" "%~dp0..\assets\branding\windows\input-mode-english.ico" english
+if errorlevel 1 exit /b %errorlevel%
 rc /nologo /fo"%TI_OUT%\product-app.res" "%~dp0..\platforms\windows\resources\product.rc"
 if errorlevel 1 exit /b %errorlevel%
 rc /nologo /dTI_DLL /fo"%TI_OUT%\product-tip.res" "%~dp0..\platforms\windows\resources\product.rc"

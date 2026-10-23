@@ -17,12 +17,16 @@ int wmain(int argc,wchar_t** argv){
     const auto module=LoadLibraryExW(argv[1],nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
     if(!module){CoUninitialize();return 4;}
     int result{};
-    {
-        const auto icon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(1),IMAGE_ICON,48,48,0));
-        transinput::testing::PreviewBuffer buffer(48,48);
-        RECT bounds{0,0,48,48};FillRect(buffer.dc,&bounds,static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-        if(!icon||!DrawIconEx(buffer.dc,0,0,icon,48,48,0,nullptr,DI_NORMAL)||!buffer.Save((std::wstring(argv[2])+L"\\indicator-TI.png").c_str()))result=8;
-        if(icon)DestroyIcon(icon);
+    for(int resource=1;resource<=3;++resource){
+        const auto name=resource==1?L"TI":resource==2?L"chinese":L"english";
+        for(int size:{16,48}){
+            const auto icon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(resource),IMAGE_ICON,size,size,0));
+            transinput::testing::PreviewBuffer buffer(size,size);
+            RECT bounds{0,0,size,size};const auto background=CreateSolidBrush(RGB(32,32,32));FillRect(buffer.dc,&bounds,background);DeleteObject(background);
+            const auto path=std::wstring(argv[2])+L"\\indicator-"+name+L"-"+std::to_wstring(size)+L".png";
+            if(!icon||!DrawIconEx(buffer.dc,0,0,icon,size,size,0,nullptr,DI_NORMAL)||!buffer.Save(path.c_str()))result=8;
+            if(icon)DestroyIcon(icon);
+        }
     }
     {
         using GetClass=HRESULT(WINAPI*)(REFCLSID,REFIID,void**);

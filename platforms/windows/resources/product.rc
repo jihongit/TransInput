@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <windows.h>
 1 ICON "assets/branding/windows/input-indicator.ico"
+2 ICON "assets/branding/windows/input-mode-chinese.ico"
+3 ICON "assets/branding/windows/input-mode-english.ico"
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 0,1,0,0
  PRODUCTVERSION 0,1,0,0

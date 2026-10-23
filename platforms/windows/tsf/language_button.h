@@ -25,7 +25,7 @@ public:
     LanguageButton(std::atomic<long>* leases,HMODULE module,std::function<HRESULT()> toggle):leases_(leases),module_(module),toggle_(std::move(toggle)){++*leases_;}
     ~LanguageButton(){--*leases_;}
     void Disconnect()noexcept{connected_=false;toggle_={};sink_.Reset();}
-    void English(bool value)noexcept{if(english_==value)return;english_=value;auto sink=sink_;if(sink)sink->OnUpdate(TF_LBI_TEXT|TF_LBI_TOOLTIP);}
+    void English(bool value)noexcept{if(english_==value)return;english_=value;auto sink=sink_;if(sink)sink->OnUpdate(TF_LBI_ICON|TF_LBI_TEXT|TF_LBI_TOOLTIP);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid,void** out)override{
         if(!out)return E_POINTER;*out=nullptr;
         if(iid==IID_IUnknown||iid==IID_ITfLangBarItem||iid==IID_ITfLangBarItemButton)*out=static_cast<ITfLangBarItemButton*>(this);
@@ -36,7 +36,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetInfo(TF_LANGBARITEMINFO* info)override{
         if(!info)return E_POINTER;*info={};const auto hr=Check();if(FAILED(hr))return hr;
         info->clsidService=ClassId;info->guidItem=GUID_LBI_INPUTMODE;info->dwStyle=TF_LBI_STYLE_BTN_BUTTON|TF_LBI_STYLE_SHOWNINTRAY;
-        wcscpy_s(info->szDescription,L"TransInput TI");return S_OK;
+        wcscpy_s(info->szDescription,L"TransInput 中英文模式");return S_OK;
     }
     HRESULT STDMETHODCALLTYPE GetStatus(DWORD* value)override{if(!value)return E_POINTER;*value=shown_?0:TF_LBI_STATUS_HIDDEN;return Check();}
     HRESULT STDMETHODCALLTYPE Show(BOOL show)override{const auto hr=Check();if(FAILED(hr))return hr;const bool value=show!=FALSE;if(shown_!=value){shown_=value;auto sink=sink_;if(sink)sink->OnUpdate(TF_LBI_STATUS);}return S_OK;}
@@ -46,9 +46,9 @@ public:
     HRESULT STDMETHODCALLTYPE OnMenuSelect(UINT)override{return Check();}
     HRESULT STDMETHODCALLTYPE GetIcon(HICON* icon)override{
         if(!icon)return E_POINTER;*icon=nullptr;const auto hr=Check();if(FAILED(hr))return hr;
-        *icon=static_cast<HICON>(LoadImageW(module_,MAKEINTRESOURCEW(1),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0));return *icon?S_OK:E_FAIL;
+        *icon=static_cast<HICON>(LoadImageW(module_,MAKEINTRESOURCEW(english_?3:2),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0));return *icon?S_OK:E_FAIL;
     }
-    HRESULT STDMETHODCALLTYPE GetText(BSTR* value)override{return Text(value,L"TI");}
+    HRESULT STDMETHODCALLTYPE GetText(BSTR* value)override{return Text(value,english_?L"英":L"中");}
     HRESULT STDMETHODCALLTYPE AdviseSink(REFIID iid,IUnknown* object,DWORD* cookie)override{
         if(!cookie)return E_POINTER;*cookie=TF_INVALID_COOKIE;const auto hr=Check();if(FAILED(hr))return hr;
         if(iid!=IID_ITfLangBarItemSink)return CONNECT_E_CANNOTCONNECT;if(!object)return E_INVALIDARG;if(sink_)return CONNECT_E_ADVISELIMIT;
