@@ -48,6 +48,7 @@ public:
     unsigned extent_reads{};LONG extent_start{},extent_end{};DWORD extent_lock{};
     bool hold_reads{};
     bool hold_writes{};
+    bool record_writes{};std::vector<std::wstring> write_history;
     void NotifyLayout(){if(sink_)Check(sink_->OnLayoutChange(TS_LC_CHANGE,1),"notify own layout change");}
     void ReleaseReads(){
         hold_reads=false;if(pending_lock_&&!lock_){const auto flags=std::exchange(pending_lock_,0);HRESULT result{};Check(RequestLock(flags,&result),"grant deferred own read lock");Check(result,"deferred own read result");}
@@ -156,7 +157,7 @@ public:
             text_.replace(static_cast<size_t>(start), static_cast<size_t>(end - start), value ? value : L"", length);
             *change = {start, end, start + static_cast<LONG>(length)};
             selection_ = {change->acpNewEnd, change->acpNewEnd, {TS_AE_END, FALSE}};
-            ++writes; return S_OK;
+            ++writes;if(record_writes)write_history.push_back(text_);return S_OK;
         } catch (...) { return E_OUTOFMEMORY; }
     }
     HRESULT STDMETHODCALLTYPE GetFormattedText(LONG, LONG, IDataObject** value) override { if (value) *value = nullptr; return E_NOTIMPL; }
@@ -751,6 +752,19 @@ void TranslationCases(IClassFactory* factory,TranslationFixture& fixture){
     {Host host(factory);host.Type("nihao");WaitRows(host,9);const auto writes=host.store->writes;
         WaitEnglish(host);Pumps(2);Require(host.store->writes==writes&&host.store->text()==L"nihao","inline translation rewrote host text");
         host.Key(VK_RETURN,TiTestControl);WaitText(host.store.Get(),L"Hello");}
+    fixture.Mode(1);
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.store->record_writes=true;
+        host.store->hold_writes=true;host.Key(VK_LEFT);host.Key('2');
+        Require(host.store->write_history.empty(),"translation bypassed held write lock");host.store->ReleaseWrites();WaitText(host.store.Get(),L"Hello");
+        Require(host.store->write_history==std::vector<std::wstring>{L"Hello"},"queued draft replayed before complete English commit");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.store->record_writes=true;host.Key('2');
+        Require(host.store->text()==L"Hello","ready English commit unnecessarily deferred to another message-pump turn");
+        Require(host.store->write_history==std::vector<std::wstring>{L"Hello"},"ready English was filled through intermediate writes");}
+    fixture.Mode(4);
+    for(const auto key:{'2','3'}){Host host(factory);host.Type("nihao");WaitEnglish(host);host.store->record_writes=true;
+        std::wstring expected=key=='3'?L"你好 ":L"";for(unsigned i=0;i<8;++i)expected+=L"Let's catch up tomorrow at 10:30 a.m. Please bring the revised draft. ";
+        host.Key(key);Require(host.store->text()==expected,"long translated commit unnecessarily deferred");
+        Require(host.store->write_history==std::vector<std::wstring>{expected},"long English/bilingual commit exposed partial text");}
     fixture.Mode(1);
     {Host host(factory);host.Type("bj");WaitEnglish(host);WaitRows(host,9);const auto writes=host.store->writes;
         host.Key(VK_DOWN);auto view=WaitEnglish(host);BOOL ready{};uint32_t selected{};Check(view->TranslationState(&ready,&selected),"inline selected row");

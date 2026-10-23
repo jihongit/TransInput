@@ -30,6 +30,7 @@
 #include "candidate_accessibility.h"
 #include "session_id.h"
 #include "language_button.h"
+#include "commit_presentation.h"
 #ifdef TI_TRANSLATION_FIXTURE
 #include "../tests/candidate_test_interface.h"
 #include "../tests/preview_png.h"
@@ -406,7 +407,7 @@ enum class OperationKind { Update, Commit, Cancel, Resolve };
 struct Operation {
     OperationKind kind;std::wstring text;size_t cursor{};uint64_t request{};size_t candidate{};
     std::wstring suffix,learning_input,learning_text;
-    bool conditional{};
+    bool conditional{},immediate{};
 };
 // Captured once at the physical key boundary; draining never rereads modifiers
 // or injects keys into the host. These are composition commands, not OS events.
@@ -420,6 +421,7 @@ struct ContextState {
     bool anchor_pending{};
     std::unique_ptr<WindowPositionEvents> window_events;
     std::shared_ptr<CandidateView> view;
+    std::weak_ptr<transinput::CommitPresentation> commit_presentation;
     std::deque<Operation> pending;
     std::deque<LogicalKey> deferred;
     uint64_t choice_request{};
@@ -602,6 +604,13 @@ HRESULT AttachLayout(const std::shared_ptr<ContextState>& state){
     if(FAILED(hr)){state->layout_source.Reset();state->layout_cookie=TF_INVALID_COOKIE;}return hr;
 }
 
+HWND CommitWindow(ContextState& state){
+    if(!state.presentation_enabled)return nullptr;
+    const auto focused=GetFocus();if(transinput::CommitPresentation::Eligible(focused))return focused;
+    ComPtr<ITfContextView> view;HWND window{};
+    if(FAILED(state.context->GetActiveView(&view))||!view||FAILED(view->GetWnd(&window)))return nullptr;
+    return focused&&(focused==window||IsChild(window,focused))?focused:window;
+}
 HRESULT EditOperation(ContextState& state, TfEditCookie cookie, const Operation& operation) {
     auto learning_scope=transinput::Scope::Unknown;
     ComPtr<ITfRange> range;
@@ -686,7 +695,11 @@ public:
             while (!state_->pending.empty() && processed++ < max_pending) {
                 if(state_->pending.front().kind==OperationKind::Resolve)break;
                 auto operation = std::move(state_->pending.front()); state_->pending.pop_front();
+                auto frame=state_->commit_presentation.lock();const auto target=operation.immediate?CommitWindow(*state_):nullptr;
+                transinput::CommitPresentation::Call presentation_call(frame.get());
+                if(frame&&target)frame->Begin(target);
                 state_->last_error = EditOperation(*state_, cookie, operation);
+                if(FAILED(state_->last_error)&&frame)frame->Restore(target);
                 if (FAILED(state_->last_error)) {TraceFailure("text edit operation",state_->last_error);state_->unavailable=true;DiscardCommands(*state_);break; }
             }
             state_->scheduled = false;
@@ -699,7 +712,8 @@ public:
 HRESULT Schedule(const std::shared_ptr<ContextState>& state){
     if(state->scheduled||state->pending.empty()||state->pending.front().kind==OperationKind::Resolve)return S_OK;
     ComPtr<EditSession> edit;edit.Attach(new EditSession(state));state->scheduled=true;
-    HRESULT result{};const auto hr=state->context->RequestEditSession(state->client,edit.Get(),TF_ES_ASYNC|TF_ES_READWRITE,&result);
+    const DWORD timing=state->pending.front().immediate?TF_ES_ASYNCDONTCARE:TF_ES_ASYNC;
+    HRESULT result{};const auto hr=state->context->RequestEditSession(state->client,edit.Get(),timing|TF_ES_READWRITE,&result);
     if(FAILED(hr)||FAILED(result)){state->scheduled=false;state->last_error=FAILED(hr)?hr:result;return state->last_error;}
     return S_OK;
 }
@@ -710,7 +724,8 @@ HRESULT Enqueue(const std::shared_ptr<ContextState>& state, Operation operation)
     std::deque<Operation> previous;
     const bool can_schedule=!state->scheduled&&(state->pending.empty()||state->pending.front().kind!=OperationKind::Resolve);
     if(can_schedule)previous=state->pending;
-    if (operation.kind == OperationKind::Update && !state->pending.empty()
+    if (operation.immediate&&!state->pending.empty()&&state->pending.back().kind==OperationKind::Update)state->pending.back()=std::move(operation);
+    else if (operation.kind == OperationKind::Update && !state->pending.empty()
         && state->pending.back().kind == OperationKind::Update) state->pending.back() = std::move(operation);
     else {
         if (state->pending.size() == max_pending) return HRESULT_FROM_WIN32(ERROR_BUSY);
@@ -745,6 +760,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
     ComPtr<ITfSource> source_;
     ComPtr<ITfLangBarItemMgr> language_bar_;
     ComPtr<transinput::LanguageButton> language_button_;
+    std::shared_ptr<transinput::CommitPresentation> commit_presentation_;
     std::shared_ptr<CandidateView> view_;
     std::shared_ptr<ContextState> state_;
     std::unique_ptr<transinput::AsyncBroker> broker_;
@@ -904,8 +920,12 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(!english&&row>=view_->candidates.size())return;
         const auto text=english?(bilingual?current->candidates[current->selected]+L" "+view_->english:view_->english):view_->candidates[row];
         Operation operation{OperationKind::Commit,text};
+        operation.immediate=english;
         if(current->learn&&!english){operation.learning_input=current->input;operation.learning_text=text;}
-        if(FAILED(Enqueue(current,std::move(operation))))return;
+        auto frame=commit_presentation_;const auto target=english?CommitWindow(*current):nullptr;
+        transinput::CommitPresentation::Call presentation_call(frame.get());
+        if(frame&&target)frame->Begin(target);
+        if(FAILED(Enqueue(current,std::move(operation)))){if(frame)frame->Restore(target);return;}
         InvalidateTranslation(*current);current->input.clear();current->cursor=0;current->selected=0;++current->revision;
         current->candidate_source.clear();current->candidates.clear();Publish(current);
     }
@@ -983,6 +1003,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
     }
 
     void Cancel() {
+        if(commit_presentation_)commit_presentation_->Restore();
         if (state_) {
             InvalidateTranslation(*state_);
             state_->presentation_enabled=false;++state_->revision;
@@ -1231,6 +1252,7 @@ public:
         if (manager_) return E_UNEXPECTED;
         try {
             owner_thread_ = GetCurrentThreadId(); client_ = client; manager_ = manager;stopping_=false;english_mode_=false;ResetShift();
+            commit_presentation_=std::make_shared<transinput::CommitPresentation>(module_handle,&live_objects);
             view_ = std::make_shared<CandidateView>();
             choose_target_=std::make_shared<ChooseTarget>();choose_target_->owner=this;
             const std::weak_ptr<ChooseTarget> weak_choose=choose_target_;
@@ -1285,6 +1307,7 @@ public:
 #endif
         try{FailPending();}catch(...){pending_commits_.clear();}
         try { Cancel(); } catch (...) { state_.reset(); }
+        commit_presentation_.reset();
         translator_.reset();
         if (auto view=std::move(view_)) view->Close();
         if (source_ && cookie_ != TF_INVALID_COOKIE) source_->UnadviseSink(std::exchange(cookie_, TF_INVALID_COOKIE));
@@ -1480,6 +1503,7 @@ public:
             if(state_&&state_->context.Get()!=context)Cancel();
             if(!state_){
                 state_=std::make_shared<ContextState>();state_->context=context;state_->client=client_;state_->view=view_;
+                state_->commit_presentation=commit_presentation_;
                 state_->sink.Attach(new CompositionSink(state_));if(translator_)state_->translate=translator_->SubmitHook();
                 TraceFailure("advise candidate layout",AttachLayout(state_));
             }

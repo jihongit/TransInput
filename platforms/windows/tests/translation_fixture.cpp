@@ -20,7 +20,7 @@ void Run(HANDLE channel,HANDLE stop,Current& current,uint32_t& mode,uint32_t& ob
     std::array<uint8_t,wire::HeaderSize> data{};if(pipe::Read(channel,stop,data)!=0)return;const auto request=wire::DecodeHeader(data);
     if(request.length>804)return;std::vector<uint8_t> body(request.length);if(pipe::Read(channel,stop,body)!=0)return;
     ULONG process{};if(!GetNamedPipeClientProcessId(channel,&process))return;
-    if(request.kind==31){if(request.revision>3)return;mode=static_cast<uint32_t>(request.revision);current={};observations=0;}
+    if(request.kind==31){if(request.revision>4)return;mode=static_cast<uint32_t>(request.revision);current={};observations=0;}
     else if(request.kind==translation::Observe){
         wire::Reader reader{body};const auto length=reader.U32();if(length>800||body.size()!=4+length)return;const auto text=reader.Data(length);
         current={process,request.session,request.revision,GetTickCount64(),{reinterpret_cast<const char*>(text.data()),text.size()}};++observations;
@@ -31,7 +31,8 @@ void Run(HANDLE channel,HANDLE stop,Current& current,uint32_t& mode,uint32_t& ob
     if(mode&&current.process==process&&current.session==request.session&&current.revision==request.revision){
         if(mode==2&&GetTickCount64()-current.started<650)view.status=3;
         else if(mode==3){view.status=5;view.failure=2;}
-        else {view.status=4;view.output=current.source=="你好"?"Hello":current.source=="北京"?"Beijing":"Fixture translation";}
+        else {view.status=4;view.output=current.source=="你好"?"Hello":current.source=="北京"?"Beijing":"Fixture translation";
+            if(mode==4){view.output.clear();for(unsigned i=0;i<8;++i)view.output+="Let's catch up tomorrow at 10:30 a.m. Please bring the revised draft. ";}}
     }
     if(request.kind==32){view.status=4;view.output=std::to_string(observations);}
     if(request.kind==34){view.status=4;view.output=current.source;}

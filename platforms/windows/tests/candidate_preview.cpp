@@ -10,9 +10,37 @@
 #include "../tsf/identity.h"
 #include "candidate_test_interface.h"
 #include "preview_png.h"
+#include "../tsf/commit_presentation.h"
 using Microsoft::WRL::ComPtr;
+bool CommitPresentationChecks(){
+    const auto instance=GetModuleHandleW(nullptr);
+    WNDCLASSW cls{};cls.hInstance=instance;cls.lpszClassName=L"Scintilla";cls.lpfnWndProc=DefWindowProcW;
+    if(!RegisterClassW(&cls))return false;
+    const auto window=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,cls.lpszClassName,L"Owned commit drawing fixture",WS_POPUP,
+        GetSystemMetrics(SM_XVIRTUALSCREEN)-8192,GetSystemMetrics(SM_YVIRTUALSCREEN)-8192,32,32,nullptr,nullptr,instance,nullptr);
+    if(!window){UnregisterClassW(cls.lpszClassName,instance);return false;}
+    auto frame=std::make_shared<transinput::CommitPresentation>(instance);
+    bool good=!frame->Begin(window)&&!IsWindowVisible(window);
+    ShowWindow(window,SW_SHOWNOACTIVATE);
+    {transinput::CommitPresentation::Call outer(frame.get());good=good&&frame->Begin(window)&&GetPropW(window,L"SysSetRedraw");
+        good=good&&!frame->Begin(window);
+        const auto deadline=GetTickCount64()+32;
+        while(GetTickCount64()<deadline){MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}MsgWaitForMultipleObjectsEx(0,nullptr,1,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}
+        good=good&&frame->Active(window)&&GetPropW(window,L"SysSetRedraw");}
+    good=good&&frame->Active(window); // The key callback has returned; legacy IME work may still follow.
+    const auto deadline=GetTickCount64()+500;
+    while(!frame->Empty()&&GetTickCount64()<deadline){MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}MsgWaitForMultipleObjectsEx(0,nullptr,1,QS_ALLINPUT,MWMO_INPUTAVAILABLE);}
+    good=good&&frame->Empty();
+    good=good&&IsWindowVisible(window)&&!GetPropW(window,L"SysSetRedraw");
+    try{transinput::CommitPresentation::Call failure(frame.get());frame->Begin(window);throw 1;}catch(...){good=good&&frame->Empty()&&IsWindowVisible(window)&&!GetPropW(window,L"SysSetRedraw");}
+    frame->Begin(window);frame.reset();good=good&&IsWindowVisible(window)&&!GetPropW(window,L"SysSetRedraw");
+    ShowWindow(window,SW_HIDE);DestroyWindow(window);UnregisterClassW(cls.lpszClassName,instance);
+    return good;
+}
 int wmain(int argc,wchar_t** argv){
     if(argc!=3)return 2;
+    if(!CommitPresentationChecks()){std::puts("FAIL: commit frame restoration/hidden/nested/error/shutdown path");return 9;}
+    std::puts("PASS: owned Scintilla commit frame covers legacy work after callback; nested loops defer restore; timer/error/shutdown restore; hidden windows stay hidden");
     const auto initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(initialized))return 3;
     const auto module=LoadLibraryExW(argv[1],nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
     if(!module){CoUninitialize();return 4;}
