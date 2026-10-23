@@ -4,6 +4,8 @@
 
 ## 使用
 
+当前已更新Shift单按中英切换、浅色候选窗与TI标识，用户代表性实际输入已通过，见[本轮记录](testing/2026-10-23-shift-light.md)。翻译模式下1/空格提交选中中文、2提交对应英文、3提交“中文 英文”、Enter提交原始拼音；用方向键或鼠标切换中文，等待译文时2/3不会提交旧内容。四种输出已经用户实际确认，见[快捷键记录](testing/2026-10-23-number-choices.md)。更换模型Key：托盘彩色TransInput图标（可能在隐藏区）→ 设置 → 翻译 → API Key → 保存；不用发到聊天。单独按下并松开Shift切换；Caps Lock仍按系统大写规则工作。
+
 已安装紧凑版，用户本轮实际复验确认“布局符合预期，未见明显闪烁”，见[截图修正报告](testing/2026-10-23-compact-candidates.md)。这项反馈对应本轮布局和可见闪烁；其他应用/长时场景仍须分别验证。应用已加载的旧模块须完全退出该应用后重新打开才能更换；仅关闭一个标签页或切换输入法可能仍保留原进程。不强制结束用户程序。
 
 按Win＋空格选择TransInput；设置位于系统托盘（也可能在隐藏图标区）。现有DeepSeek配置继续使用，无须把Key发给维护者。“已安装的应用”中可找到TransInput本机验收版的卸载项。当前仍为未签名本机验收版，不等于正式发行。
@@ -24,7 +26,7 @@
 
 安装目录内的 `maintenance\install-local-preview.ps1` 同样支持上述维护操作，已测试从该脚本执行完整卸载，包括移除自身文件。文件占用时不强制关闭其他应用，保留卸载记录以便重试。
 
-仅替换经过完整检查的候选界面修复 DLL，可使用源码中的 `update-local-preview-tip.ps1 -PackagePath <verified-preview>` 先查看计划，再加 `-Action Apply -AcceptUnsignedLocalPreview` 执行。旧 DLL 重命名保留供已打开进程继续使用，不直接覆盖映射字节；新进程加载新版，已有应用需要自行重新打开。此方式不替换共享后台或设置程序，具体检查点和备份写入安装记录。
+替换经过完整检查的两架构TIP DLL及对应注册助手，可使用源码中的 `update-local-preview-tip.ps1 -PackagePath <verified-preview>` 先查看计划，再加 `-Action Apply -AcceptUnsignedLocalPreview` 执行。旧映像重命名保留，不直接覆盖映射字节；新进程加载新版，已有应用需要自行重新打开。更新仅核对/新增本项目SYSTRAYSUPPORT类别，失败回滚本轮新增类别和四文件；不声明未验证的Immersive能力，不替换共享后台或设置程序。检查点、备份与更新结果写入安装记录。
 
 ## 从独立源码准备本机验收安装
 

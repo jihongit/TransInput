@@ -112,7 +112,7 @@ if errorlevel 1 exit /b %errorlevel%
 cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /DUNICODE /D_UNICODE "%~dp0..\platforms\windows\tests\accessibility_smoke.cpp" /Fo"%TI_OUT%\accessibility-smoke.obj" /Fe"%TI_OUT%\accessibility-smoke.exe" /link ole32.lib oleaut32.lib uuid.lib user32.lib uiautomationcore.lib
 if errorlevel 1 exit /b %errorlevel%
 if "%~3"=="integration" exit /b 0
-cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /DUNICODE /D_UNICODE /I"%~dp0..\bindings" "%~dp0..\platforms\windows\tests\candidate_preview.cpp" /Fo"%TI_OUT%\candidate-preview.obj" /Fe"%TI_OUT%\candidate-preview.exe" /link ole32.lib uuid.lib
+cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /DUNICODE /D_UNICODE /I"%~dp0..\bindings" "%~dp0..\platforms\windows\tests\candidate_preview.cpp" /Fo"%TI_OUT%\candidate-preview.obj" /Fe"%TI_OUT%\candidate-preview.exe" /link ole32.lib uuid.lib user32.lib gdi32.lib gdiplus.lib
 if errorlevel 1 exit /b %errorlevel%
 :native_editor
 cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /DUNICODE /D_UNICODE /I"%~dp0..\bindings" "%~dp0..\platforms\windows\tests\input_pad.cpp" /Fo"%TI_OUT%\input-pad.obj" /Fe"%TI_OUT%\TransInputTestHost.exe" /link /SUBSYSTEM:WINDOWS ole32.lib oleaut32.lib uuid.lib user32.lib advapi32.lib gdi32.lib shell32.lib

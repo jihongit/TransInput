@@ -44,7 +44,8 @@ foreach($tiSource in $tiSources.sources){if((Hash (Join-Path $tiRoot $tiSource.p
 $tiBinaries=Get-Content -LiteralPath (Join-Path $tiCheckpoint.path 'binary-snapshot.json') -Raw|ConvertFrom-Json
 $tiChanges=@()
 foreach($tiArchitecture in @('x64','x86')){
- $tiRelative=$tiArchitecture+'/TransInputPrototype.dll'
+ foreach($tiName in @('TransInputPrototype.dll','TransInputRegister.exe')){
+ $tiRelative=$tiArchitecture+'/'+$tiName
  $tiEntry=@($tiManifest.files|Where-Object {$_.path -ceq $tiRelative})
  $tiInstalled=@($tiState.files|Where-Object {$_.path -ceq $tiRelative})
  $tiVerified=@($tiBinaries.files|Where-Object {$_.path -ceq ('build/'+$tiRelative)})
@@ -52,12 +53,14 @@ foreach($tiArchitecture in @('x64','x86')){
  $tiInput=Join-Path $PackagePath $tiRelative
  if((Hash $tiInput) -cne $tiEntry[0].sha256){throw 'New TIP checksum mismatch'}
  if($tiInstalled[0].sha256 -ceq $tiEntry[0].sha256){continue}
- $tiBackup=$tiArchitecture+'/TransInputPrototype.before-'+$tiInstalled[0].sha256+'.dll'
- $tiStage=$tiArchitecture+'/TransInputPrototype.pending-'+$tiEntry[0].sha256+'.dll'
+ $tiStem=[IO.Path]::GetFileNameWithoutExtension($tiName);$tiExtension=[IO.Path]::GetExtension($tiName)
+ $tiBackup=$tiArchitecture+'/'+$tiStem+'.before-'+$tiInstalled[0].sha256+$tiExtension
+ $tiStage=$tiArchitecture+'/'+$tiStem+'.pending-'+$tiEntry[0].sha256+$tiExtension
  foreach($tiName in @($tiBackup,$tiStage)){if(Test-Path -LiteralPath (Owned-Path $tiName)){throw 'Update staging/backup already exists; inspect before retrying'}}
  $tiChanges+=[pscustomobject]@{architecture=$tiArchitecture;path=$tiRelative;input=$tiInput;old_hash=$tiInstalled[0].sha256;new_hash=$tiEntry[0].sha256;backup=$tiBackup;stage=$tiStage;renamed=$false;swapped=$false}
+ }
 }
-$tiPlan=[ordered]@{action=$Action;target=$tiTarget;changes=@($tiChanges|Select-Object architecture,path,old_hash,new_hash,backup);restarts_apps=$false;registry_changes=$false;network_requests=$false;executed=$false}
+$tiPlan=[ordered]@{action=$Action;target=$tiTarget;changes=@($tiChanges|Select-Object architecture,path,old_hash,new_hash,backup);restarts_apps=$false;registry_changes='own TSF system-tray category only';network_requests=$false;executed=$false}
 if($Action -eq 'Plan' -or -not $tiChanges.Count){$tiPlan|ConvertTo-Json -Depth 6;return}
 $tiEvidence=Join-Path $tiRoot ('artifacts\tip-update\'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $tiEvidence|Out-Null
@@ -66,8 +69,9 @@ $tiPlan|ConvertTo-Json -Depth 6|Set-Content (Join-Path $tiEvidence 'plan.json') 
 $tiJournal=Owned-Path 'tip-update-journal.json'
 if(Test-Path -LiteralPath $tiJournal){throw 'An unfinished TIP update requires inspection'}
 function Save-Journal { $tiChanges|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $tiJournal -Encoding UTF8 }
+$tiBrandingAdded=@()
 try {
- # Stage both verified DLLs before changing either installed path. A loaded old
+ # Stage the verified TIP/helper pairs before changing any installed path. A loaded old
  # image is renamed, never truncated, deleted, or modified in a user process.
  foreach($tiChange in $tiChanges){$tiOutput=Owned-Path $tiChange.stage;Copy-Item -LiteralPath $tiChange.input -Destination $tiOutput;if((Hash $tiOutput) -cne $tiChange.new_hash){throw 'Staged TIP checksum mismatch'}}
  Save-Journal
@@ -75,10 +79,18 @@ try {
   Move-Item -LiteralPath (Owned-Path $tiChange.path) -Destination (Owned-Path $tiChange.backup);$tiChange.renamed=$true;Save-Journal
   Move-Item -LiteralPath (Owned-Path $tiChange.stage) -Destination (Owned-Path $tiChange.path);$tiChange.swapped=$true;Save-Journal
  }
- foreach($tiChange in $tiChanges){
-  $tiHelper=Owned-Path ($tiChange.architecture+'/TransInputRegister.exe')
-  & $tiHelper --verify-registered *> (Join-Path $tiEvidence ($tiChange.architecture+'-registered.txt'))
+ foreach($tiArchitecture in @('x64','x86')){
+  $tiHelper=Owned-Path ($tiArchitecture+'/TransInputRegister.exe')
+  $tiBranding=& $tiHelper --refresh-branding-local-preview --acknowledge-unsigned-local-preview
+  $tiBranding|Set-Content (Join-Path $tiEvidence ($tiArchitecture+'-branding.txt')) -Encoding UTF8
+  if($LASTEXITCODE -ne 0){throw 'Updated branding registration failed'}
+  $tiBrandingState=$tiBranding|ConvertFrom-Json
+  if(-not $tiBrandingState.success){throw 'Updated branding registration failed'}
+  if($tiBrandingState.branding_added){$tiBrandingAdded+=$tiArchitecture}
+  & $tiHelper --verify-registered *> (Join-Path $tiEvidence ($tiArchitecture+'-registered.txt'))
   if($LASTEXITCODE -ne 0){throw 'Updated registered COM activation failed'}
+ }
+ foreach($tiChange in $tiChanges){
   $tiEntry=$tiState.files|Where-Object {$_.path -ceq $tiChange.path};$tiEntry.sha256=$tiChange.new_hash
   $tiState.files+= [pscustomobject]@{path=$tiChange.backup;sha256=$tiChange.old_hash}
  }
@@ -89,9 +101,10 @@ try {
  Move-Item -LiteralPath $tiTemporary -Destination $tiMarker -Force
  foreach($tiFile in $tiState.files){if((Hash (Owned-Path $tiFile.path)) -cne $tiFile.sha256){throw 'Post-update file verification failed'}}
  Remove-Item -LiteralPath $tiJournal
- [ordered]@{success=$true;updated_tip_architectures=@($tiChanges.architecture);files_verified=@($tiState.files).Count;requires_app_restart=$true;other_installed_components_unchanged=$true;evidence=$tiEvidence}|ConvertTo-Json -Depth 5|Tee-Object (Join-Path $tiEvidence 'result.json')
+ [ordered]@{success=$true;updated_tip_architectures=@($tiChanges.architecture|Sort-Object -Unique);updated_components=@($tiChanges.path);branding_added=@($tiBrandingAdded);files_verified=@($tiState.files).Count;requires_app_restart=$true;other_installed_components_unchanged=$true;evidence=$tiEvidence}|ConvertTo-Json -Depth 5|Tee-Object (Join-Path $tiEvidence 'result.json')
 } catch {
  $tiFailure=$_.Exception.Message;$tiRollback=@()
+ foreach($tiArchitecture in $tiBrandingAdded){try{$tiHelper=Owned-Path ($tiArchitecture+'/TransInputRegister.exe');& $tiHelper --rollback-branding-local-preview --acknowledge-unsigned-local-preview *> (Join-Path $tiEvidence ($tiArchitecture+'-branding-rollback.txt'));if($LASTEXITCODE -ne 0){$tiRollback+='branding-'+$tiArchitecture}}catch{$tiRollback+='branding-'+$tiArchitecture}}
  for($tiIndex=$tiChanges.Count-1;$tiIndex -ge 0;$tiIndex--){$tiChange=$tiChanges[$tiIndex];try {
   if($tiChange.swapped){$tiPath=Owned-Path $tiChange.path;if((Hash $tiPath) -cne $tiChange.new_hash){throw 'Unexpected replacement file'};Remove-Item -LiteralPath $tiPath}
   if($tiChange.renamed){$tiBackupPath=Owned-Path $tiChange.backup;if((Hash $tiBackupPath) -cne $tiChange.old_hash){throw 'Unexpected backup file'};Move-Item -LiteralPath $tiBackupPath -Destination (Owned-Path $tiChange.path)}

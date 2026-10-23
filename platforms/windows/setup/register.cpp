@@ -21,6 +21,7 @@
 using Microsoft::WRL::ComPtr;
 namespace {
 constexpr LANGID Language=0x0804;
+const GUID Categories[]{GUID_TFCAT_TIP_KEYBOARD,GUID_TFCAT_TIPCAP_UIELEMENTENABLED,GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT};
 const std::wstring ClassKey=L"SOFTWARE\\Classes\\CLSID\\{40E2B4B8-B417-47D3-AACF-F49A77858E40}";
 constexpr wchar_t Layout[]=L"0x0804:{40E2B4B8-B417-47D3-AACF-F49A77858E40}{AE1C8AF6-3CE7-45A5-B256-8B6FE28037F3}";
 struct Step {std::function<HRESULT()> apply,undo;};
@@ -71,9 +72,9 @@ HRESULT Install(const std::wstring& dll,unsigned& undo_failures){
     TF_INPUTPROCESSORPROFILE old{};const bool profile_exists=profiles->GetProfile(TF_PROFILETYPE_INPUTPROCESSOR,Language,transinput::ClassId,transinput::ProfileId,nullptr,&old)==S_OK;
     bool peer_exists{};result=HasExpectedPeer(dll,peer_exists);if(FAILED(result))return result;
     if(profile_exists&&!existing&&!peer_exists)return HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
-    const GUID wanted[]{GUID_TFCAT_TIP_KEYBOARD,GUID_TFCAT_TIPCAP_UIELEMENTENABLED};bool category_exists[2]{};
-    for(size_t i=0;i<2;++i){result=HasCategory(categories.Get(),wanted[i],category_exists[i]);if(FAILED(result))return result;}
-    bool class_created{},profile_attempted{},category_attempted[2]{};std::vector<Step> steps;
+    bool category_exists[std::size(Categories)]{};
+    for(size_t i=0;i<std::size(Categories);++i){result=HasCategory(categories.Get(),Categories[i],category_exists[i]);if(FAILED(result))return result;}
+    bool class_created{},profile_attempted{},category_attempted[std::size(Categories)]{};std::vector<Step> steps;
     steps.push_back({[&]()->HRESULT{if(existing)return S_OK;HKEY key{};DWORD disposition{};auto status=RegCreateKeyExW(HKEY_LOCAL_MACHINE,ClassKey.c_str(),0,nullptr,0,KEY_WRITE,nullptr,&key,&disposition);if(status)return HRESULT_FROM_WIN32(status);class_created=disposition==REG_CREATED_NEW_KEY;RegCloseKey(key);if(!class_created)return HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
         status=RegCreateKeyExW(HKEY_LOCAL_MACHINE,(ClassKey+L"\\InprocServer32").c_str(),0,nullptr,0,KEY_WRITE,nullptr,&key,nullptr);if(status)return HRESULT_FROM_WIN32(status);
         status=RegSetValueExW(key,nullptr,0,REG_SZ,reinterpret_cast<const BYTE*>(dll.c_str()),static_cast<DWORD>((dll.size()+1)*sizeof(wchar_t)));
@@ -81,7 +82,7 @@ HRESULT Install(const std::wstring& dll,unsigned& undo_failures){
         [&]()->HRESULT{return class_created?HRESULT_FROM_WIN32(RegDeleteTreeW(HKEY_LOCAL_MACHINE,ClassKey.c_str())):S_OK;}});
     steps.push_back({[&]()->HRESULT{if(profile_exists)return S_OK;profile_attempted=true;return profiles->RegisterProfile(transinput::ClassId,Language,transinput::ProfileId,L"TransInput",10,dll.c_str(),static_cast<ULONG>(dll.size()),0,nullptr,0,FALSE,0);},
         [&]()->HRESULT{if(!profile_attempted)return S_OK;const auto removed=profiles->UnregisterProfile(transinput::ClassId,Language,transinput::ProfileId,0);if(FAILED(removed))return removed;return !peer_exists&&!existing?UnregisterService(profiles.Get()):S_OK;}});
-    for(size_t i=0;i<2;++i)steps.push_back({[&,i]()->HRESULT{if(category_exists[i])return S_OK;category_attempted[i]=true;return categories->RegisterCategory(transinput::ClassId,wanted[i],transinput::ClassId);},[&,i]()->HRESULT{return category_attempted[i]?categories->UnregisterCategory(transinput::ClassId,wanted[i],transinput::ClassId):S_OK;}});
+    for(size_t i=0;i<std::size(Categories);++i)steps.push_back({[&,i]()->HRESULT{if(category_exists[i])return S_OK;category_attempted[i]=true;return categories->RegisterCategory(transinput::ClassId,Categories[i],transinput::ClassId);},[&,i]()->HRESULT{return category_attempted[i]?categories->UnregisterCategory(transinput::ClassId,Categories[i],transinput::ClassId):S_OK;}});
     return Run(steps,undo_failures);
 }
 HRESULT Uninstall(const std::wstring& dll){
@@ -94,7 +95,7 @@ HRESULT Uninstall(const std::wstring& dll){
     auto result=CoCreateInstance(CLSID_TF_InputProcessorProfiles,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&profiles));if(FAILED(result))return result;
     result=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&categories));if(FAILED(result))return result;
     TF_INPUTPROCESSORPROFILE profile{};if(profiles->GetProfile(TF_PROFILETYPE_INPUTPROCESSOR,Language,transinput::ClassId,transinput::ProfileId,nullptr,&profile)==S_OK){result=profiles->UnregisterProfile(transinput::ClassId,Language,transinput::ProfileId,0);if(FAILED(result))return result;}
-    for(const auto& value:{GUID_TFCAT_TIPCAP_UIELEMENTENABLED,GUID_TFCAT_TIP_KEYBOARD}){bool found{};result=HasCategory(categories.Get(),value,found);if(FAILED(result))return result;if(found){result=categories->UnregisterCategory(transinput::ClassId,value,transinput::ClassId);if(FAILED(result))return result;}}
+    for(const auto& value:Categories){bool found{};result=HasCategory(categories.Get(),value,found);if(FAILED(result))return result;if(found){result=categories->UnregisterCategory(transinput::ClassId,value,transinput::ClassId);if(FAILED(result))return result;}}
     result=UnregisterService(profiles.Get());if(FAILED(result))return result;
     return HRESULT_FROM_WIN32(RegDeleteTreeW(HKEY_LOCAL_MACHINE,ClassKey.c_str()));
 }
@@ -102,11 +103,18 @@ HRESULT Enable(bool enabled){const auto module=LoadLibraryExW(L"input.dll",nullp
 HRESULT Verify(const std::wstring& dll){std::wstring path;auto result=ClassPath(path);if(FAILED(result))return result;if(_wcsicmp(path.c_str(),dll.c_str())!=0)return HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
     ComPtr<ITfInputProcessorProfileMgr> profiles;ComPtr<ITfCategoryMgr> categories;result=CoCreateInstance(CLSID_TF_InputProcessorProfiles,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&profiles));if(FAILED(result))return result;
     TF_INPUTPROCESSORPROFILE profile{};result=profiles->GetProfile(TF_PROFILETYPE_INPUTPROCESSOR,Language,transinput::ClassId,transinput::ProfileId,nullptr,&profile);if(result!=S_OK)return FAILED(result)?result:E_FAIL;
-    result=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&categories));if(FAILED(result))return result;for(const auto& category:{GUID_TFCAT_TIP_KEYBOARD,GUID_TFCAT_TIPCAP_UIELEMENTENABLED}){bool found{};result=HasCategory(categories.Get(),category,found);if(FAILED(result)||!found)return FAILED(result)?result:E_FAIL;}
+    result=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&categories));if(FAILED(result))return result;for(const auto& category:Categories){bool found{};result=HasCategory(categories.Get(),category,found);if(FAILED(result)||!found)return FAILED(result)?result:E_FAIL;}
     ComPtr<ITfTextInputProcessorEx> service;result=CoCreateInstance(transinput::ClassId,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&service));if(FAILED(result))return result;
     const auto address=(*reinterpret_cast<void***>(service.Get()))[0];HMODULE module{};if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(address),&module))return HRESULT_FROM_WIN32(GetLastError());
     wchar_t loaded[32768]{};if(!GetModuleFileNameW(module,loaded,32768))return HRESULT_FROM_WIN32(GetLastError());if(_wcsicmp(loaded,dll.c_str())!=0)return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
     std::printf("{\"registered_com_loaded\":true,\"profile_flags\":%lu,\"categories_verified\":true}\n",profile.dwFlags);return S_OK;
+}
+HRESULT Branding(const std::wstring& dll,bool remove,bool& added){
+    added=false;std::wstring path;auto hr=ClassPath(path);if(FAILED(hr))return hr;if(_wcsicmp(path.c_str(),dll.c_str())!=0)return E_ACCESSDENIED;
+    ComPtr<ITfCategoryMgr> categories;hr=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&categories));if(FAILED(hr))return hr;
+    bool exists{};hr=HasCategory(categories.Get(),GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,exists);if(FAILED(hr))return hr;
+    if(remove)return exists?categories->UnregisterCategory(transinput::ClassId,GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,transinput::ClassId):S_OK;
+    if(exists)return S_OK;hr=categories->RegisterCategory(transinput::ClassId,GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,transinput::ClassId);added=SUCCEEDED(hr);return hr;
 }
 bool SelfCheck(){
     for(size_t fail=0;fail<4;++fail){bool values[4]{};std::vector<Step> steps;unsigned failures{};for(size_t i=0;i<4;++i)steps.push_back({[&,i](){values[i]=true;return i==fail?E_FAIL:S_OK;},[&,i](){values[i]=false;return S_OK;}});if(Run(steps,failures)!=E_FAIL||failures||std::any_of(std::begin(values),std::end(values),[](bool value){return value;}))return false;}
@@ -117,7 +125,8 @@ int wmain(int argc,wchar_t** argv){
     if(argc<2||argc>3)return 2;const std::wstring action=argv[1];
     if(action==L"--self-check"){if(!SelfCheck())return 1;std::puts("PASS: transaction failure at each stage rolls back partial/current and earlier changes; no system registration performed");return 0;}
     if(action==L"--plan"){std::puts("{\"schema\":1,\"machine_actions\":[\"own COM class\",\"official TSF RegisterProfile\",\"keyboard and UIElement categories\"],\"user_enable_separate\":true,\"sets_default\":false,\"creates_start_menu\":false,\"preserves_user_data\":true,\"executed\":false}");return 0;}
-    const bool preview=action==L"--register-local-preview"||action==L"--unregister-local-preview"||action==L"--enable-local-preview"||action==L"--disable-local-preview";
+    const bool branding=action==L"--refresh-branding-local-preview"||action==L"--rollback-branding-local-preview";
+    const bool preview=action==L"--register-local-preview"||action==L"--unregister-local-preview"||action==L"--enable-local-preview"||action==L"--disable-local-preview"||branding;
     const bool verify=action==L"--verify-registered";
     if(preview&&(argc!=3||std::wstring(argv[2])!=L"--acknowledge-unsigned-local-preview"))return 2;
     if(!preview&&argc!=2)return 2;
@@ -128,9 +137,10 @@ int wmain(int argc,wchar_t** argv){
         const bool registering=action==L"--register-signed"||action==L"--register-local-preview";
         const bool unregistering=action==L"--unregister-signed"||action==L"--unregister-local-preview";
         const bool enabling=action==L"--enable-signed"||action==L"--enable-local-preview";
-        const bool machine=registering||unregistering;if(machine&&!Elevated()){std::fputs("BLOCKED: existing deployment permissions are required; no elevation requested\n",stderr);return 6;}
+        const bool machine=registering||unregistering||branding;if(machine&&!Elevated()){std::fputs("BLOCKED: existing deployment permissions are required; no elevation requested\n",stderr);return 6;}
         const auto initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(initialized))return 7;unsigned rollback_failures{};
-        const auto result=verify?Verify(dll):registering?Install(dll,rollback_failures):unregistering?Uninstall(dll):Enable(enabling);CoUninitialize();
+        bool branding_added{};const auto result=branding?Branding(dll,action==L"--rollback-branding-local-preview",branding_added):verify?Verify(dll):registering?Install(dll,rollback_failures):unregistering?Uninstall(dll):Enable(enabling);CoUninitialize();
+        if(branding){std::printf("{\"branding_added\":%s,\"success\":%s}\n",branding_added?"true":"false",SUCCEEDED(result)?"true":"false");return SUCCEEDED(result)?0:1;}
         std::printf("{\"hresult\":\"0x%08lx\",\"rollback_failures\":%u,\"local_preview\":%s,\"sets_default\":false,\"changes_trust_or_policy\":false}\n",static_cast<unsigned long>(result),rollback_failures,preview?"true":"false");return SUCCEEDED(result)?0:1;
     }catch(...){std::fputs("FAIL: deployment helper error; inspect project-owned registration before retrying\n",stderr);return 1;}
 }

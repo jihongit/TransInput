@@ -29,6 +29,7 @@
 #include "candidate_ui.h"
 #include "candidate_accessibility.h"
 #include "session_id.h"
+#include "language_button.h"
 #ifdef TI_TRANSLATION_FIXTURE
 #include "../tests/candidate_test_interface.h"
 #include "../tests/preview_png.h"
@@ -162,6 +163,8 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     }
 
     int Px(int value)const noexcept{return MulDiv(value,static_cast<int>(font_dpi?font_dpi:96),96);}
+    std::wstring Label(size_t row)const{return (translation_mode?(row==selected?L"1. ":L"· "):std::to_wstring(row+1)+L". ")+candidates[row];}
+    std::wstring EnglishLabel()const{return L"2. "+english;}
     void ContentChanged()noexcept{interaction.Changed();layout_dirty=true;english_layout.Reset();}
     int ChineseRight(int width)const noexcept{return std::max(Px(64),std::min(selected_width?selected_width:Px(230),width/3));}
     RECT EnglishRect(int width)const noexcept{
@@ -172,16 +175,17 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     void MeasureLayout(HDC dc,RECT bounds){
         layout.Set(std::vector<int>(candidates.size(),Px(row_height)),std::max(0,static_cast<int>(bounds.bottom)-Px(footer_height)));
         layout.EnsureVisible(selected);
-        if(selected<candidates.size()){const auto label=std::to_wstring(selected+1)+L". "+candidates[selected];SIZE extent{};GetTextExtentPoint32W(dc,label.data(),static_cast<int>(label.size()),&extent);selected_width=Px(16)+extent.cx;}
+        if(selected<candidates.size()){const auto label=Label(selected);SIZE extent{};GetTextExtentPoint32W(dc,label.data(),static_cast<int>(label.size()),&extent);selected_width=Px(16)+extent.cx;}
         RECT measure{0,0,std::max(1,static_cast<int>(bounds.right)-ChineseRight(bounds.right)-Px(40)),0};
-        if(!english.empty())DrawTextW(dc,english.data(),static_cast<int>(english.size()),&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
+        const auto english_label=EnglishLabel();if(!english.empty())DrawTextW(dc,english_label.data(),static_cast<int>(english_label.size()),&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
         english_layout.Set({std::max(1,static_cast<int>(measure.bottom))},Px(row_height-4));layout_dirty=false;
     }
     void ScrollTo(int offset)noexcept{
         if(layout.ScrollTo(offset)){interaction.Changed();Refresh();}
     }
     void Draw(HDC dc,RECT bounds){
-        HBRUSH background=CreateSolidBrush(RGB(12,24,60));FillRect(dc,&bounds,background);DeleteObject(background);
+        HBRUSH background=CreateSolidBrush(RGB(250,252,255));FillRect(dc,&bounds,background);DeleteObject(background);
+        const auto border=CreateSolidBrush(RGB(203,213,225));FrameRect(dc,&bounds,border);DeleteObject(border);
         SelectedFont selected_font(dc,font);SetBkMode(dc,TRANSPARENT);
         if(layout_dirty)MeasureLayout(dc,bounds);
         RECT text{};
@@ -189,22 +193,22 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         for(size_t row=0;row<candidates.size();++row){
             const auto top=Px(8)+layout.Top(row)-layout.Offset();const auto height=layout.Height(row);
             if(top+height<=Px(8)||top>=Px(8)+layout.Viewport())continue;
-            if(row==selected){RECT highlight{Px(8),top,bounds.right-Px(8),top+height};const auto brush=CreateSolidBrush(RGB(22,46,87));FillRect(dc,&highlight,brush);DeleteObject(brush);}
+            if(row==selected){RECT highlight{Px(8),top,bounds.right-Px(8),top+height};const auto brush=CreateSolidBrush(RGB(229,240,255));FillRect(dc,&highlight,brush);DeleteObject(brush);}
             text={Px(16),top+Px(2),row==selected&&!english.empty()?ChineseRight(bounds.right):bounds.right-Px(16),top+height-Px(2)};
-            SetTextColor(dc,row==selected?RGB(61,236,212):RGB(245,247,255));
-            const auto label=std::to_wstring(row+1)+L". "+candidates[row];
+            SetTextColor(dc,row==selected?RGB(0,95,139):RGB(30,41,59));
+            const auto label=Label(row);
             DrawTextW(dc,label.data(),static_cast<int>(label.size()),&text,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX|DT_END_ELLIPSIS);
             if(row==selected&&!english.empty()){
                 auto dash=text;dash.left=ChineseRight(bounds.right);dash.right=dash.left+Px(20);DrawTextW(dc,L"—",1,&dash,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);
                 const auto clip=EnglishRect(bounds.right);const auto english_saved=SaveDC(dc);IntersectClipRect(dc,clip.left,clip.top,clip.right,clip.bottom);
                 const auto text_top=top+Px(2)+std::max(0,(Px(row_height-4)-english_layout.Content())/2)-english_layout.Offset();
                 RECT translated{clip.left,text_top,clip.right,text_top+english_layout.Content()};
-                SetTextColor(dc,RGB(219,231,247));DrawTextW(dc,english.data(),static_cast<int>(english.size()),&translated,DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);RestoreDC(dc,english_saved);
+                const auto label_english=EnglishLabel();SetTextColor(dc,RGB(51,65,85));DrawTextW(dc,label_english.data(),static_cast<int>(label_english.size()),&translated,DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);RestoreDC(dc,english_saved);
             }
         }
-        RestoreDC(dc,saved);SetTextColor(dc,RGB(160,177,205));SelectedFont footer(dc,footer_font);
+        RestoreDC(dc,saved);SetTextColor(dc,RGB(100,116,139));SelectedFont footer(dc,footer_font);
         text={Px(16),bounds.bottom-Px(44),bounds.right-Px(16),bounds.bottom-Px(25)};
-        DrawTextW(dc,preedit.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
+        const auto spelling=translation_mode?preedit+L" · ↑↓ 选词":preedit;DrawTextW(dc,spelling.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
         text={Px(16),bounds.bottom-Px(23),bounds.right-Px(16),bounds.bottom-Px(5)};
         const auto hint=english_layout.MaxOffset()&&!english.empty()?L"滚轮查看英文 · "+status:status;
         DrawTextW(dc,hint.c_str(),-1,&text,DT_SINGLELINE|DT_NOPREFIX|DT_END_ELLIPSIS);
@@ -406,7 +410,7 @@ struct Operation {
 };
 // Captured once at the physical key boundary; draining never rereads modifiers
 // or injects keys into the host. These are composition commands, not OS events.
-struct LogicalKey {WPARAM key{};wchar_t punctuation{};bool translation_enabled{};int page_direction{};wchar_t literal{};bool direct{},english{};};
+struct LogicalKey {WPARAM key{};wchar_t punctuation{};bool translation_enabled{};int page_direction{};wchar_t literal{};bool direct{},english{},mode_boundary{};unsigned output_choice{};};
 struct ContextState {
     ComPtr<ITfContext> context;
     ComPtr<ITfComposition> composition;
@@ -739,6 +743,8 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
     ComPtr<ITfThreadMgr> manager_;
     ComPtr<ITfKeystrokeMgr> keys_;
     ComPtr<ITfSource> source_;
+    ComPtr<ITfLangBarItemMgr> language_bar_;
+    ComPtr<transinput::LanguageButton> language_button_;
     std::shared_ptr<CandidateView> view_;
     std::shared_ptr<ContextState> state_;
     std::unique_ptr<transinput::AsyncBroker> broker_;
@@ -751,6 +757,9 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
     TfClientId client_{TF_CLIENTID_NULL};
     bool allow_learning_{},learning_enabled_{};
     bool stopping_{};
+    bool english_mode_{},shift_tap_{};
+    WPARAM shift_key_{};
+    ComPtr<ITfContext> shift_context_;
 #ifdef TI_TRANSLATION_FIXTURE
     bool hold_candidates_{};
     DWORD candidate_failure_{};
@@ -768,6 +777,27 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         }
 #endif
         return GetKeyState(key);
+    }
+    static bool IsShift(WPARAM key)noexcept{return key==VK_SHIFT||key==VK_LSHIFT||key==VK_RSHIFT;}
+    bool ShortcutModifier()const noexcept{return (KeyState(VK_CONTROL)&0x8000)||(KeyState(VK_MENU)&0x8000)||(KeyState(VK_LWIN)&0x8000)||(KeyState(VK_RWIN)&0x8000);}
+    void ResetShift()noexcept{shift_tap_=false;shift_key_=0;shift_context_.Reset();}
+    HRESULT ToggleMode(ITfContext* context){
+        if(!manager_||!context||GetCurrentThreadId()!=owner_thread_)return E_UNEXPECTED;
+        ResetShift();
+        TF_STATUS status{};if(FAILED(context->GetStatus(&status))||(status.dwDynamicFlags&TF_SD_READONLY))return S_FALSE;
+        if(!english_mode_&&state_&&state_->context.Get()==context&&!state_->input.empty()){
+            const auto current=state_;
+            // This is an ordered composition boundary, never a synthetic key.
+            // If a previous choice already committed the Chinese, it is a no-op.
+            LogicalKey boundary{};boundary.key=VK_SPACE;boundary.mode_boundary=true;
+            bool accepted{};HRESULT hr{};
+            if(current->choice_request||!current->deferred.empty()){
+                if(current->pending.size()+current->deferred.size()>=max_pending-2)return HRESULT_FROM_WIN32(ERROR_BUSY);
+                current->deferred.push_back(boundary);accepted=true;
+            }else hr=ApplyKey(current,boundary,accepted);
+            if(FAILED(hr)||!accepted)return FAILED(hr)?hr:E_FAIL;
+        }
+        english_mode_=!english_mode_;auto button=language_button_;if(button)button->English(english_mode_);return S_OK;
     }
     wchar_t LiteralKey(WPARAM key,LPARAM flags)const noexcept{
         if(key>255)return 0;
@@ -811,6 +841,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         const auto old_session=view_->session,old_revision=view_->revision;
         const auto old_selected=view_->selected;
         const auto old_candidates=view_->candidates;
+        const auto old_mode=view_->translation_mode;
         const auto old_english=view_->english;
         const auto old_status=view_->status,old_preedit=view_->preedit;
         view_->session=state->session;view_->preedit=state->input;view_->selected=state->selected;
@@ -823,13 +854,13 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(view_->translation_mode&&!state->unavailable){
             if(state->translation_status==4&&state->candidate_source==state->input&&state->selected<state->candidates.size()&&
                 state->translation_source==state->candidates[state->selected])view_->english=state->translation_output;
-            view_->status=state->translation_status==4?L"↑↓ 选词 · 空格 / 数字 中文 · 点击英文 / Ctrl+Enter 英文":
+            view_->status=state->translation_status==4?L"1/空格 中文 · 2 英文 · 3 中英 · Enter 字母":
                 state->translation_status==5?L"翻译暂不可用 · 空格选中文 · F5 重试":
                 state->scope==transinput::Scope::Unknown?L"正在检查输入框 · 空格选中文":
                 state->translation_status==0?L"翻译已关闭 · 空格选中文":L"正在翻译 · 空格可先选中文";
         }
         if(state->choice_request){view_->candidates.clear();view_->status=L"正在选词…";}
-        const bool content_changed=old_session!=view_->session||old_revision!=view_->revision||old_selected!=view_->selected||old_candidates!=view_->candidates||old_english!=view_->english;
+        const bool content_changed=old_session!=view_->session||old_revision!=view_->revision||old_selected!=view_->selected||old_candidates!=view_->candidates||old_english!=view_->english||old_mode!=view_->translation_mode;
         if(content_changed)view_->ContentChanged();
         view_->visible=!state->input.empty();if(!view_->visible)view_->Hide();else{
             state->context->GetDocumentMgr(&view_->document);
@@ -854,7 +885,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(state_&&TranslationMode(*state_)&&row!=english_target){FromHostUi(transinput::UiAction::Select,row,generation);return;}
         Choose(generation,row);
     }
-    void Choose(uint64_t generation,size_t row){
+    void Choose(uint64_t generation,size_t row,bool bilingual=false){
         ComPtr<TextService> lifetime(this);
         if(!manager_||GetCurrentThreadId()!=owner_thread_||!state_||!view_||!view_->visible||
             generation!=view_->interaction.Generation()||(row!=english_target&&row>=view_->candidates.size()))return;
@@ -871,7 +902,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(english&&(!TranslationMode(*current)||current->scope!=transinput::Scope::Allowed||current->translation_status!=4||view_->english.empty()||
             current->selected>=current->candidates.size()||current->translation_source!=current->candidates[current->selected]||view_->english!=current->translation_output))return;
         if(!english&&row>=view_->candidates.size())return;
-        const auto text=english?view_->english:view_->candidates[row];
+        const auto text=english?(bilingual?current->candidates[current->selected]+L" "+view_->english:view_->english):view_->candidates[row];
         Operation operation{OperationKind::Commit,text};
         if(current->learn&&!english){operation.learning_input=current->input;operation.learning_text=text;}
         if(FAILED(Enqueue(current,std::move(operation))))return;
@@ -1001,7 +1032,8 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
             || (KeyState(VK_LWIN) & 0x8000) || (KeyState(VK_RWIN) & 0x8000)) return false;
         const bool composing = state_ && !state_->input.empty();
         const bool queued=state_&&(!state_->pending.empty()||!state_->deferred.empty()||state_->choice_request);
-        if(KeyState(VK_CAPITAL)&1){
+        if(IsShift(key))return !ShortcutModifier();
+        if(english_mode_||(KeyState(VK_CAPITAL)&1)){
             if(!composing&&!queued)return false;
             if(LiteralKey(key,flags))return true;
         }
@@ -1018,6 +1050,13 @@ public:
     HRESULT STDMETHODCALLTYPE CheckPresentation(uint32_t* placements,uint32_t* paints) override {
         if(!placements||!paints)return E_POINTER;*placements=0;*paints=0;
         try{
+            {unsigned toggles{};ComPtr<transinput::LanguageButton> button;button.Attach(new transinput::LanguageButton(&live_objects,module_handle,[&](){++toggles;return S_OK;}));
+                TF_LANGBARITEMINFO info{};if(FAILED(button->GetInfo(&info))||info.guidItem!=GUID_LBI_INPUTMODE||info.clsidService!=transinput::ClassId)return E_FAIL;
+                BSTR text{};if(FAILED(button->GetText(&text)))return E_FAIL;const bool named=std::wstring_view(text,SysStringLen(text))==L"TI";SysFreeString(text);if(!named)return E_FAIL;
+                HICON icon{};if(FAILED(button->GetIcon(&icon))||!icon)return E_FAIL;DestroyIcon(icon);
+                if(FAILED(button->OnClick(TF_LBI_CLK_LEFT,{},nullptr))||toggles!=1)return E_FAIL;
+                button->Disconnect();if(button->OnClick(TF_LBI_CLK_LEFT,{},nullptr)!=CO_E_OBJNOTCONNECTED||toggles!=1)return E_FAIL;
+            }
             const auto owner=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"STATIC",L"TransInput owned offscreen rendering fixture",WS_POPUP,
                 GetSystemMetrics(SM_XVIRTUALSCREEN)-8192,GetSystemMetrics(SM_YVIRTUALSCREEN)-8192,100,100,nullptr,nullptr,module_handle,nullptr);
             if(!owner)return E_FAIL;
@@ -1085,6 +1124,14 @@ public:
         BOOL up{};hr=OnTestKeyUp(context,key,0,&up);if(FAILED(hr)||!up)return FAILED(hr)?hr:E_FAIL;
         hr=OnKeyUp(context,key,0,&up);return FAILED(hr)?hr:up?S_OK:E_FAIL;
     }
+    HRESULT STDMETHODCALLTYPE KeyEvent(ITfContext* context,uint32_t key,uint32_t modifiers,BOOL up,BOOL* eaten) override {
+        if(!eaten)return E_POINTER;*eaten=FALSE;
+        if(!context||key>255||(modifiers&~31u)||!manager_||GetCurrentThreadId()!=owner_thread_||test_modifiers_)return E_INVALIDARG;
+        struct FixedModifiers{TextService& owner;~FixedModifiers(){owner.test_modifiers_.reset();}}fixed{*this};test_modifiers_=modifiers;
+        BOOL allowed{};auto hr=up?OnTestKeyUp(context,key,0,&allowed):OnTestKeyDown(context,key,0,&allowed);
+        if(FAILED(hr)||!allowed)return hr;
+        return up?OnKeyUp(context,key,0,eaten):OnKeyDown(context,key,0,eaten);
+    }
     HRESULT STDMETHODCALLTYPE FreshSession(uint64_t* value) override {
         if(!value)return E_POINTER;
         try{*value=transinput::NewSessionId();return S_OK;}catch(...){return E_FAIL;}
@@ -1114,7 +1161,7 @@ public:
             view.font=CreateFontW(-view.Px(16),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
             view.footer_font=CreateFontW(-view.Px(13),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
             if(!view.font)return E_FAIL;
-            view.preedit=bottom?L"changyiwen":L"ns";view.status=L"↑↓ 选词 · 空格 / 数字 中文 · 点击英文 / Ctrl+Enter 英文";
+            view.preedit=bottom?L"changyiwen":L"ns";view.status=L"1/空格 中文 · 2 英文 · 3 中英 · Enter 字母";
             const std::wstring source=L"今天下午我们先核对这份虚构方案，确认后再安排明天的测试。";
             std::wstring english;
             for(unsigned i=0;i<8;++i)english+=L"Let's review this fictional proposal this afternoon and schedule tomorrow's test after everything is confirmed. ";
@@ -1168,13 +1215,21 @@ public:
         if (!manager) return E_INVALIDARG;
         if (manager_) return E_UNEXPECTED;
         try {
-            owner_thread_ = GetCurrentThreadId(); client_ = client; manager_ = manager;stopping_=false;
+            owner_thread_ = GetCurrentThreadId(); client_ = client; manager_ = manager;stopping_=false;english_mode_=false;ResetShift();
             view_ = std::make_shared<CandidateView>();
             choose_target_=std::make_shared<ChooseTarget>();choose_target_->owner=this;
             const std::weak_ptr<ChooseTarget> weak_choose=choose_target_;
             view_->choose=[weak_choose](uint64_t generation,size_t row){if(auto target=weak_choose.lock();target&&target->owner)target->owner->Click(generation,row);};
             view_->ui.Manager(manager);
             view_->ui_action=[weak_choose](transinput::UiAction action,size_t row,uint64_t generation)->HRESULT{if(auto target=weak_choose.lock();target&&target->owner)return target->owner->FromHostUi(action,row,generation);return CO_E_OBJNOTCONNECTED;};
+            if(SUCCEEDED(manager_.As(&language_bar_))){
+                language_button_.Attach(new transinput::LanguageButton(&live_objects,module_handle,[weak_choose]()->HRESULT{
+                    if(auto target=weak_choose.lock();target&&target->owner){auto self=target->owner;ComPtr<ITfDocumentMgr> document;ComPtr<ITfContext> context;
+                        if(FAILED(self->manager_->GetFocus(&document))||!document||FAILED(document->GetTop(&context))||!context)return S_FALSE;
+                        return self->ToggleMode(context.Get());}return CO_E_OBJNOTCONNECTED;
+                }));
+                if(FAILED(language_bar_->AddItem(language_button_.Get()))){language_button_->Disconnect();language_button_.Reset();language_bar_.Reset();}
+            }
             HRESULT hr = manager_.As(&keys_);
             TraceFailure("query key manager", hr);
             if (SUCCEEDED(hr)) { hr = keys_->AdviseKeyEventSink(client_, this, TRUE); TraceFailure("advise key events", hr); }
@@ -1208,6 +1263,7 @@ public:
         if (manager_ && owner_thread_ != GetCurrentThreadId()) return RPC_E_WRONG_THREAD;
         stopping_=true;
         if(choose_target_)choose_target_->owner=nullptr;choose_target_.reset();
+        if(language_button_){if(language_bar_)language_bar_->RemoveItem(language_button_.Get());language_button_->Disconnect();language_button_.Reset();}language_bar_.Reset();
         broker_.reset();
 #ifdef TI_TRANSLATION_FIXTURE
         held_candidates_.clear();hold_candidates_=false;candidate_failure_=0;
@@ -1220,26 +1276,34 @@ public:
         if (keys_ && client_ != TF_CLIENTID_NULL) keys_->UnadviseKeyEventSink(client_);
         source_.Reset(); keys_.Reset(); manager_.Reset(); client_ = TF_CLIENTID_NULL;
         key_down_.fill(false);
+        ResetShift();english_mode_=false;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnSetFocus(BOOL foreground) override {
-        try { if (!foreground) Cancel(); return S_OK; } catch (...) { return E_FAIL; }
+        try { if (!foreground) {ResetShift();key_down_.fill(false);Cancel();} return S_OK; } catch (...) { return E_FAIL; }
     }
     HRESULT STDMETHODCALLTYPE OnTestKeyDown(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) override {
         if (!eaten) return E_POINTER;
         *eaten = FALSE;
         if(manager_&&GetCurrentThreadId()!=owner_thread_)return RPC_E_WRONG_THREAD;
+        // Observe chords even when the other key belongs to the application.
+        if(shift_tap_&&(!IsShift(key)||key!=shift_key_||ShortcutModifier()||shift_context_.Get()!=context))ResetShift();
         TF_STATUS status{};
         if (!context || FAILED(context->GetStatus(&status)) || (status.dwDynamicFlags & TF_SD_READONLY)) return S_OK;
         *eaten = Eats(key,flags); return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnTestKeyUp(ITfContext*, WPARAM key, LPARAM, BOOL* eaten) override {
         if (!eaten) return E_POINTER;
+        if(manager_&&GetCurrentThreadId()!=owner_thread_)return RPC_E_WRONG_THREAD;
         *eaten = key < key_down_.size() && key_down_[key]; return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnKeyUp(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) override {
         const HRESULT hr = OnTestKeyUp(context, key, flags, eaten);
         if (key < key_down_.size()) key_down_[key] = false;
+        if(SUCCEEDED(hr)&&*eaten&&IsShift(key)){
+            const bool toggle=shift_tap_&&shift_key_==key&&shift_context_.Get()==context&&!ShortcutModifier();ResetShift();
+            if(toggle){try{return ToggleMode(context);}catch(...){return E_OUTOFMEMORY;}}
+        }
         return hr;
     }
     HRESULT STDMETHODCALLTYPE OnPreservedKey(ITfContext*, REFGUID, BOOL* eaten) override {
@@ -1247,10 +1311,11 @@ public:
         *eaten = FALSE; return S_OK;
     }
     HRESULT ApplyKey(const std::shared_ptr<ContextState>& current,const LogicalKey& event,bool& accepted) {
-        const auto key=event.key;
+        const auto key=event.output_choice==1?WPARAM{VK_SPACE}:event.key;
         try {
             auto& state = *current;
-            if(event.english){accepted=true;if(current==state_&&view_)Choose(view_->interaction.Generation(),english_target);return S_OK;}
+            if(event.mode_boundary&&state.input.empty()){accepted=true;return S_OK;}
+            if(event.english||event.output_choice>=2){accepted=true;if(current==state_&&view_)Choose(view_->interaction.Generation(),english_target,event.output_choice==3);return S_OK;}
             if(state.input.empty()){
                 if(event.direct||key<'A'||key>'Z'){
                     // A command accepted while the IME owned a composition
@@ -1282,7 +1347,7 @@ public:
             size_t candidate{};
             const auto punctuation=event.punctuation;
             const bool literal_boundary=event.literal&&(event.direct||
-                (!punctuation&&!event.page_direction&&!(key>='A'&&key<='Z')&&!(key>='1'&&key<='9'&&event.literal==static_cast<wchar_t>(key))&&
+                (!punctuation&&!event.page_direction&&!(key>='A'&&key<='Z')&&!(key>='1'&&key<='9'&&event.literal==static_cast<wchar_t>(key)&&(!TranslationMode(state)||key<='3'))&&
                     key!=VK_SPACE&&!(key==VK_OEM_7&&event.literal==L'\'')));
             if(literal_boundary){
                 chinese_choice=true;suffix.assign(1,event.literal);
@@ -1389,6 +1454,14 @@ public:
         if(FAILED(test_result)||!allowed)return test_result;
         bool accepted{};
         try{
+            if(IsShift(key)){
+                // Auto-repeat and a second held Shift must not arm another tap.
+                if(!key_down_[key]&&!(static_cast<ULONG_PTR>(flags)&(ULONG_PTR{1}<<30))){
+                    const bool other=key_down_[VK_SHIFT]||key_down_[VK_LSHIFT]||key_down_[VK_RSHIFT];
+                    if(!other){shift_tap_=true;shift_key_=key;shift_context_=context;}
+                }
+                key_down_[key]=true;*eaten=TRUE;return S_OK;
+            }
             if(state_&&state_->context.Get()!=context)Cancel();
             if(!state_){
                 state_=std::make_shared<ContextState>();state_->context=context;state_->client=client_;state_->view=view_;
@@ -1397,11 +1470,13 @@ public:
             }
             auto current=state_;
             const bool shift=(KeyState(VK_SHIFT)&0x8000)!=0;
-            const bool direct=(KeyState(VK_CAPITAL)&1)!=0;
+            const bool direct=english_mode_||(KeyState(VK_CAPITAL)&1)!=0;
             const bool composing=!current->input.empty();
             LogicalKey event{key,composing&&!direct?transinput::ComposingPunctuation(key,shift):wchar_t{},translator_&&translator_->Enabled(),
                 composing&&!direct?transinput::PageDirection(key,shift):0,
                 direct||key<'A'||key>'Z'?LiteralKey(key,flags):wchar_t{},direct,key==VK_RETURN&&(KeyState(VK_CONTROL)&0x8000)!=0};
+            if(composing&&!direct&&!shift&&TranslationMode(*current)&&event.literal>=L'1'&&event.literal<=L'3'&&
+                ((key>='1'&&key<='3')||(key>=VK_NUMPAD1&&key<=VK_NUMPAD3)))event.output_choice=static_cast<unsigned>(event.literal-L'0');
             if(!current->choice_request&&!current->deferred.empty())Drain(current);
             HRESULT hr{};
             if(current->choice_request||!current->deferred.empty()){
@@ -1415,10 +1490,11 @@ public:
     HRESULT STDMETHODCALLTYPE OnUninitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE OnPushContext(ITfContext*) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE OnPopContext(ITfContext* context) override {
-        try { if (state_ && state_->context.Get() == context) Cancel(); return S_OK; } catch (...) { return E_FAIL; }
+        try { if(shift_context_.Get()==context)ResetShift();if (state_ && state_->context.Get() == context) Cancel(); return S_OK; } catch (...) { return E_FAIL; }
     }
     HRESULT STDMETHODCALLTYPE OnSetFocus(ITfDocumentMgr* focused, ITfDocumentMgr*) override {
         try {
+            ResetShift();
             if (state_) {
                 ComPtr<ITfDocumentMgr> previous;
                 if (FAILED(state_->context->GetDocumentMgr(&previous)) || previous.Get() != focused) Cancel();

@@ -16,7 +16,8 @@ struct Segment {double ax,ay,bx,by;};
 int wmain(int argc,wchar_t** argv){
     if(argc!=2)return 2;FILE* file{};if(_wfopen_s(&file,argv[1],L"wb")||!file)return 3;
     const std::array<int,6> sizes{16,20,24,32,40,48};std::vector<std::vector<uint8_t>> images;std::array<Entry,6> entries{};uint32_t offset=sizeof(Header)+sizeof entries;
-    const std::array<Segment,8> strokes{{{6,10,19,10},{19,10,19,22},{19,22,6,22},{6,22,6,10},{12.5,5,12.5,27},{19,17,26,17},{21,12,26,17},{26,17,21,22}}};
+    // Deliberately simple TI letterforms stay legible at 16 pixels.
+    const std::array<Segment,5> strokes{{{4,7,17,7},{10.5,7,10.5,25},{21,7,28,7},{24.5,7,24.5,25},{21,25,28,25}}};
     for(size_t item=0;item<sizes.size();++item){
         const int size=sizes[item],mask_stride=((size+31)/32)*4;BITMAPINFOHEADER info{sizeof info,size,size*2,1,32,BI_RGB,static_cast<DWORD>(size*size*4),0,0,0,0};
         std::vector<uint8_t> bytes(sizeof info+static_cast<size_t>(size*size*4+mask_stride*size),0);memcpy(bytes.data(),&info,sizeof info);

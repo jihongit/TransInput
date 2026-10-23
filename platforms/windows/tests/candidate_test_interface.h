@@ -21,4 +21,5 @@ struct __declspec(uuid("e3cbf18e-0980-4d71-838b-8afdd5188817")) ITestCandidateVi
     virtual HRESULT STDMETHODCALLTYPE SuppressWindow(BOOL suppress)=0;
     virtual HRESULT STDMETHODCALLTYPE CheckPresentation(uint32_t* placements,uint32_t* paints)=0;
     virtual HRESULT STDMETHODCALLTYPE TranslationState(BOOL* ready,uint32_t* selected)=0;
+    virtual HRESULT STDMETHODCALLTYPE KeyEvent(ITfContext* context,uint32_t key,uint32_t modifiers,BOOL up,BOOL* eaten)=0;
 };

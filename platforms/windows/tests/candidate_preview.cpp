@@ -9,6 +9,7 @@
 #include <string>
 #include "../tsf/identity.h"
 #include "candidate_test_interface.h"
+#include "preview_png.h"
 using Microsoft::WRL::ComPtr;
 int wmain(int argc,wchar_t** argv){
     if(argc!=3)return 2;
@@ -16,6 +17,13 @@ int wmain(int argc,wchar_t** argv){
     const auto module=LoadLibraryExW(argv[1],nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
     if(!module){CoUninitialize();return 4;}
     int result{};
+    {
+        const auto icon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(1),IMAGE_ICON,48,48,0));
+        transinput::testing::PreviewBuffer buffer(48,48);
+        RECT bounds{0,0,48,48};FillRect(buffer.dc,&bounds,static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+        if(!icon||!DrawIconEx(buffer.dc,0,0,icon,48,48,0,nullptr,DI_NORMAL)||!buffer.Save((std::wstring(argv[2])+L"\\indicator-TI.png").c_str()))result=8;
+        if(icon)DestroyIcon(icon);
+    }
     {
         using GetClass=HRESULT(WINAPI*)(REFCLSID,REFIID,void**);
         const auto get=std::bit_cast<GetClass>(GetProcAddress(module,"DllGetClassObject"));

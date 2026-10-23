@@ -382,6 +382,31 @@ void LiteralText(Host& host,const std::wstring& text){
 }
 void MixedCases(IClassFactory* factory,TranslationFixture& translation,CandidateFixture& candidates){
     translation.Mode(0);
+    const auto edge=[](Host& host,uint32_t key,uint32_t modifiers,BOOL up){BOOL eaten{};Check(host.test_keys->KeyEvent(host.context.Get(),key,modifiers,up,&eaten),"owned modifier edge");return eaten!=FALSE;};
+    {Host host(factory);BOOL eaten{};
+        Require(edge(host,VK_SHIFT,TiTestShift,FALSE)&&edge(host,VK_SHIFT,TiTestShift,FALSE),"Shift repeat not owned");
+        Require(edge(host,VK_SHIFT,0,TRUE),"Shift release not owned");
+        Check(host.test_keys->Key(host.context.Get(),'A',0,&eaten,nullptr),"idle Shift English passthrough");Require(!eaten,"Shift did not switch to English exactly once");
+        host.Key(VK_SHIFT);host.Type("nihao");host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");}
+    {Host host(factory);auto control=HoldCandidates(host);host.Type("nihao");host.Key(VK_SHIFT);
+        for(const auto key:{'G','P','T'})host.Key(key,TiTestShift);
+        host.Key(VK_SHIFT);host.Type("ceshi");host.Key(VK_SPACE);Check(control->HoldCandidates(FALSE),"release Shift boundary");WaitText(host.store.Get(),L"你好GPT测试");}
+    {Host host(factory);auto control=HoldCandidates(host);host.Type("bj");host.Key('2');host.Key(VK_SHIFT);host.Key('G');host.Key(VK_SHIFT);host.Type("ceshi");host.Key(VK_SPACE);
+        Check(control->HoldCandidates(FALSE),"release numeric then Shift boundary");WaitText(host.store.Get(),L"北京g测试");}
+    {Host host(factory);auto control=HoldCandidates(host);host.store->hold_writes=true;host.Type("nihao");host.Key(VK_SHIFT);host.Key('G');host.Key(VK_SHIFT);host.Type("ceshi");host.Key(VK_SPACE);
+        Require(host.store->text().empty(),"Shift boundary bypassed held write lock");Check(control->HoldCandidates(FALSE),"release Shift candidates behind writes");host.store->ReleaseWrites();WaitText(host.store.Get(),L"你好g测试");}
+    {Host host(factory);Require(edge(host,VK_LSHIFT,TiTestShift,FALSE),"left Shift down");Require(!edge(host,VK_TAB,TiTestShift,FALSE),"Shift Tab captured");Require(edge(host,VK_LSHIFT,0,TRUE),"left Shift up");
+        host.Type("nihao");host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");}
+    {Host host(factory);for(const auto modifier:{TiTestControl,TiTestAlt,TiTestWin}){
+        Require(!edge(host,VK_SHIFT,modifier|TiTestShift,FALSE),"modified Shift captured");Require(!edge(host,VK_SHIFT,modifier,TRUE),"modified Shift release captured");}
+        Require(edge(host,VK_LSHIFT,TiTestShift,FALSE)&&edge(host,VK_RSHIFT,TiTestShift,FALSE),"two Shift downs");
+        Require(edge(host,VK_RSHIFT,TiTestShift,TRUE)&&edge(host,VK_LSHIFT,0,TRUE),"two Shift ups");
+        host.Type("nihao");host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");}
+    {Host host(factory);Require(edge(host,VK_SHIFT,TiTestShift,FALSE),"Shift before blur");Check(host.keys->OnSetFocus(FALSE),"blur during Shift");
+        Require(!edge(host,VK_SHIFT,0,TRUE),"stale Shift release owned after blur");host.Type("nihao");host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");}
+    {Host host(factory);host.store->SetReadOnly(true);Require(!edge(host,VK_SHIFT,TiTestShift,FALSE)&&!edge(host,VK_SHIFT,0,TRUE),"readonly Shift captured");
+        host.store->SetReadOnly(false);host.Type("nihao");host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");}
+    translation.Mode(0);
     {Host host(factory);auto control=HoldCandidates(host);host.Type("nihao");host.Key(VK_SPACE);host.Key('0');
         Check(control->HoldCandidates(FALSE),"release mixed boundary");WaitText(host.store.Get(),L"你好0");}
     {Host host(factory);auto control=HoldCandidates(host);host.Type("nihao");host.Key(VK_SPACE);
@@ -449,7 +474,7 @@ void MixedCases(IClassFactory* factory,TranslationFixture& translation,Candidate
         host.Key('2',TiTestCaps);WaitText(host.store.Get(),L"你好2");Pumps(2);
         Require(translation.Count()==requests,"literal suffix created another translation observation");}
     translation.Mode(0);
-    std::puts("PASS: ordered ASCII/Caps case/digits/keypad/email/path/symbols; held candidates and write locks; conditional/invalid choices; cancel/focus/readonly/failure; bounded queue; 64 rapid mixed commits; Chinese-only learning; no English translation");
+    std::puts("PASS: Shift tap toggles, repeats/chords/dual Shift/blur/readonly; ordered Chinese-English boundaries behind choices/write locks; ASCII/Caps/digits/keypad/email/path/symbols; cancel/failure/bounded queue; 64 rapid mixed commits; Chinese-only learning; no English translation");
 }
 ComPtr<ITestCandidateView> WaitPage(Host& host,uint32_t expected);
 void UiLessCases(IClassFactory* factory,TranslationFixture& translation,CandidateFixture& candidates){
@@ -706,9 +731,9 @@ void LearningCases(IClassFactory* factory,TranslationFixture& translation,Candid
     {Host host(factory);enable(host);host.Type("bj");WaitRows(host,9);host.store->reject_chinese=true;host.Key('2');Pump();
         Require(host.store->text()==L"bj"&&candidates.First("bj")=="比较","failed TSF write learned selection");}
     translation.Mode(1);
-    for(bool mouse:{false,true}){Host host(factory);enable(host);host.Type("bj");WaitEnglish(host);host.Key(VK_DOWN);auto view=WaitEnglish(host);
-        if(mouse){Check(view->Press(9),"English learning exclusion press");Check(view->ReleasePress(9),"English learning exclusion release");}else host.Key(VK_RETURN,TiTestControl);
-        WaitText(host.store.Get(),L"Beijing");Require(candidates.First("bj")=="比较","inline English learned model output");}
+    for(unsigned choice:{0u,2u,3u}){Host host(factory);enable(host);host.Type("bj");WaitEnglish(host);host.Key(VK_DOWN);auto view=WaitEnglish(host);
+        if(!choice){Check(view->Press(9),"English learning exclusion press");Check(view->ReleasePress(9),"English learning exclusion release");}else host.Key('0'+choice);
+        WaitText(host.store.Get(),choice==3?L"北京 Beijing":L"Beijing");Require(candidates.First("bj")=="比较","English/bilingual learned model output");}
     Require(GetFileAttributesW(candidates.path.c_str())==INVALID_FILE_ATTRIBUTES,"excluded input created learning file");
     translation.Mode(0);
     {Host host(factory);enable(host);host.Type("bj");WaitRows(host,9);host.Key('2');WaitText(host.store.Get(),L"北京");}
@@ -732,9 +757,18 @@ void TranslationCases(IClassFactory* factory,TranslationFixture& fixture){
         Require(ready&&selected==1&&fixture.Source()=="北京"&&host.store->writes==writes,"arrow selection rewrote text or translated another Chinese candidate");
         host.Key(VK_RETURN,TiTestControl);WaitText(host.store.Get(),L"Beijing");}
     fixture.Mode(1);
-    {Host host(factory);host.Type("bj");WaitEnglish(host);host.Key('2');WaitText(host.store.Get(),L"北京");}
+    {Host host(factory);host.Type("bj");WaitEnglish(host);host.Key(VK_DOWN);WaitEnglish(host);host.Key('1');WaitText(host.store.Get(),L"北京");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.Key('2');WaitText(host.store.Get(),L"Hello");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.Key('3');WaitText(host.store.Get(),L"你好 Hello");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.Key(VK_NUMPAD2);WaitText(host.store.Get(),L"Hello");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.Key(VK_RETURN);WaitText(host.store.Get(),L"nihao");Pumps(3);Require(host.store->text()==L"nihao","Enter committed a translated result");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.Key('4');WaitText(host.store.Get(),L"你好4");}
+    {Host host(factory);host.Type("bj");WaitEnglish(host);host.Key(VK_DOWN);host.Key('2');WaitEnglish(host);host.Key('2');WaitText(host.store.Get(),L"Beijing");}
+    {Host host(factory);host.Type("nihao");WaitEnglish(host);host.store->SetReadOnly(true);BOOL eaten{};
+        for(const auto key:{'2','3'}){Check(host.test_keys->Key(host.context.Get(),key,0,&eaten,nullptr),"readonly numeric translation");Require(!eaten,"readonly translation key accepted");}
+        Require(host.store->text()==L"nihao","readonly numeric translation wrote");host.store->SetReadOnly(false);host.Key(VK_ESCAPE);}
     fixture.Mode(2);
-    {Host host(factory);host.Type("nihao");WaitRows(host,9);host.Key(VK_RETURN,TiTestControl);Pump();Require(host.store->text()==L"nihao","waiting submitted empty or stale English");
+    {Host host(factory);host.Type("nihao");WaitRows(host,9);host.Key('2');host.Key('3');host.Key(VK_RETURN,TiTestControl);Pump();Require(host.store->text()==L"nihao","waiting submitted empty or stale English/bilingual");
         host.Key(VK_SPACE);Pumps(8);Require(host.store->text()==L"你好","waiting Chinese or late-result suppression failed");}
     fixture.Mode(2);
     {Host host(factory);host.Type("nihao");Pumps(2);host.Key(VK_OEM_COMMA);Pumps(8);Require(host.store->text()==L"你好，","punctuation during translation wait lost Chinese");}

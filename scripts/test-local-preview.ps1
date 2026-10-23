@@ -32,6 +32,8 @@ foreach($tiCase in @(
  @{arguments=@('--register-local-preview','--acknowledge-unsigned-local-preview');code=5},
  @{arguments=@('--register-signed');code=5},
  @{arguments=@('--verify-registered');code=5}
+ @{arguments=@('--refresh-branding-local-preview','--acknowledge-unsigned-local-preview');code=5}
+ @{arguments=@('--rollback-branding-local-preview','--acknowledge-unsigned-local-preview');code=5}
 )){
  $tiProcess=Start-Process -FilePath $tiExecutable -ArgumentList $tiCase.arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $tiEvidence ($tiCaseIndex.ToString()+'.out.txt')) -RedirectStandardError (Join-Path $tiEvidence ($tiCaseIndex.ToString()+'.err.txt'))
  $tiHandle=$tiProcess.Handle
