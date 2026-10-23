@@ -13,6 +13,7 @@
 #include "../tsf/async_broker.h"
 #include "../shared/protected_file.h"
 #include "../shared/words_control.h"
+#include "../shared/learning_control.h"
 #include "../translator/client.h"
 namespace transinput::testing {
 using Microsoft::WRL::ComPtr;
@@ -84,6 +85,11 @@ struct CandidateFixture {
         // Basic candidate pipes intentionally become ready before disk profiles.
         // A persistence assertion must wait for the specific profile, not infer
         // it from pipe readiness (which could legitimately return an empty set).
+        if(learning){
+            const auto deadline=GetTickCount64()+3000;transinput::learning_control::Result ready;
+            do{ready=transinput::learning_control::Query(endpoint,executable,nullptr,transinput::wire::LearningStatus,0,false,pid);if(!ready.status&&ready.view.health!=0)break;Pump();}while(GetTickCount64()<deadline);
+            Require(!ready.status&&ready.view.health==2,"restarted owned learning profile not ready");
+        }
         if(GetFileAttributesW((path+L".words").c_str())!=INVALID_FILE_ATTRIBUTES){
             const auto deadline=GetTickCount64()+3000;transinput::words_control::Result ready;
             do{ready=transinput::words_control::Query(endpoint,executable,nullptr,0,0,transinput::wire::WordsStatus,{},pid);if(!ready.status&&ready.view.health!=transinput::words_control::Loading)break;Pump();}while(GetTickCount64()<deadline);

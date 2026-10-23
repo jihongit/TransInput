@@ -63,7 +63,10 @@ public:
     ~CandidateUiSession(){End();}
     bool Publish(std::vector<std::wstring> rows,UINT selected,uint64_t generation,ITfDocumentMgr* document,std::atomic<long>* leases,
         const std::function<HRESULT(UiAction,size_t,uint64_t)>& action,const std::function<void(BOOL)>& show){
-        if(!manager_||updating_)return Allowed();if(rows.empty()){End();return true;}
+        // A query in flight has no actionable rows, but is still the same
+        // composition. Preserve the host's visibility decision and UI identity.
+        // Only the composition owner may End; never expose stale rows meanwhile.
+        if(!manager_||updating_)return Allowed();if(rows.empty()&&!active_)return Allowed();
         updating_=true;struct Reset {bool& flag;~Reset(){flag=false;}} reset{updating_};
         if(!element_)element_.Attach(new CandidateUi(leases,action,show));auto current=element_;
         current->Update(std::move(rows),selected,generation,document);

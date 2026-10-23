@@ -705,6 +705,11 @@ void LearningCases(IClassFactory* factory,TranslationFixture& translation,Candid
     Require(candidates.First("bj")=="不仅","mouse selection did not update recent preference");
 }
 void TranslationCases(IClassFactory* factory,TranslationFixture& fixture){
+    fixture.Mode(2);
+    {Host host(factory);host.Type("nihao");WaitRows(host,1);const auto writes=host.store->writes;
+        WaitRows(host,3);Pumps(2);
+        Require(host.store->writes==writes&&host.store->text()==L"nihao","translation presentation rewrote unchanged host text");
+        host.Key('2');WaitText(host.store.Get(),L"Hello");}
     fixture.Mode(1);
     {Host host(factory);host.Type("nihao");Pumps(4);host.Key('2');Pump();Require(host.store->text()==L"Hello","English choice failed");}
     fixture.Mode(1);
@@ -765,6 +770,13 @@ int wmain(int argc, wchar_t** argv) {
         else if(digits)DigitCases(factory.Get(),translation_fixture,candidate_fixture);
         else if(pages)PageCases(factory.Get(),translation_fixture,candidate_fixture);
         else{
+        {
+            Host host(factory.Get());auto control=HoldCandidates(host);host.Type("nihao");WaitText(host.store.Get(),L"nihao");
+            const auto writes=host.store->writes;Check(control->HoldCandidates(FALSE),"release presentation-only candidates");
+            WaitRows(host,9);Pumps(2);
+            Require(host.store->writes==writes,"candidate presentation rewrote unchanged host text");
+            host.Key(VK_SPACE);WaitText(host.store.Get(),L"你好");
+        }
         {
             Host host(factory.Get());BOOL eaten{};
             for(const auto modifier:{TiTestControl,TiTestAlt,TiTestWin,TiTestCaps}){

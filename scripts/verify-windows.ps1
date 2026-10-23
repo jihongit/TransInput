@@ -94,7 +94,7 @@ foreach ($tiArch in $tiArchitectures) {
     $tiCandidatePreview = Join-Path $tiEvidence "$tiArch-candidates"
     New-Item -ItemType Directory -Force $tiCandidatePreview | Out-Null
     Invoke-TiCheck "$tiArch-candidate-layout" (Join-Path $tiNative 'candidate-preview.exe') @(('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"'), ('"' + $tiCandidatePreview + '"')) 10
-    Invoke-TiCheck "$tiArch-tsf-context" (Join-Path $tiNative 'tsf-integration.exe') @('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"') 45
+    Invoke-TiCheck "$tiArch-tsf-context" (Join-Path $tiNative 'tsf-integration.exe') @('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"') 55
     Invoke-TiCheck "$tiArch-tsf-digits" (Join-Path $tiNative 'tsf-integration.exe') @(('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"'), '--digits') 35
     Invoke-TiCheck "$tiArch-tsf-pages" (Join-Path $tiNative 'tsf-integration.exe') @(('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"'), '--pages') 30
     Invoke-TiCheck "$tiArch-tsf-mixed" (Join-Path $tiNative 'tsf-integration.exe') @(('"' + (Join-Path $tiNative 'TransInputPrototypeTest.dll') + '"'), '--mixed') 45

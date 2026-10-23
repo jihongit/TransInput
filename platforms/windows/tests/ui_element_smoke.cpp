@@ -36,6 +36,11 @@ int wmain(){try{
     Need(list->Finalize()==S_OK&&actions==2,"UI finalize");UINT pages[]{0,1},bad[]{1,0};Need(list->SetPageIndex(pages,2)==S_OK&&list->SetPageIndex(bad,2)==E_INVALIDARG,"UI page validation");
     Need(list->GetPageIndex(nullptr,0,&count)==S_FALSE&&count==2&&list->GetCurrentPage(&selection)==S_OK&&selection==1,"UI page count/current");
     HRESULT cross{};std::thread thread([&]{UINT value{};cross=list->GetCount(&value);});thread.join();Need(cross==RPC_E_WRONG_THREAD,"UI thread confinement");
+    Need(!session.Publish({},0,13,nullptr,&leases,action,{}),"pending candidates lost host suppression");
+    Need(manager->begins==1&&manager->ends==0&&list->GetCount(&count)==S_OK&&count==0,"pending candidates ended/replaced UI session");
+    Need(list->Finalize()==E_UNEXPECTED&&list->SetSelection(0)==E_INVALIDARG,"pending candidates retained stale action");
+    Need(!session.Publish({L"测试"},0,14,nullptr,&leases,action,{}),"new candidates lost host suppression");
+    Need(manager->begins==1&&manager->ends==0&&list->GetCount(&count)==S_OK&&count==1,"candidate reply recreated UI session");
     Need(list->Show(TRUE)==S_OK&&session.Allowed(),"host Show TRUE ignored");session.End();Need(manager->ends==1&&list->Finalize()==CO_E_OBJNOTCONNECTED&&leases==1,"retained root acted after end");
     manager->retained.Reset();list.Reset();Need(leases==0,"retained UI lease leak");manager->fail=true;
     Need(!session.Publish({L"你好"},0,13,nullptr,&leases,action,{}),"failed Begin showed UI");manager->retained.Reset();Need(leases==0,"failed Begin root leak");manager->fail=false;manager->reenter=true;manager->on_begin=[&]{session.End();};

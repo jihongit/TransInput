@@ -21,11 +21,16 @@ int wmain(int argc,wchar_t** argv){
         const auto get=std::bit_cast<GetClass>(GetProcAddress(module,"DllGetClassObject"));
         ComPtr<IClassFactory> factory;ComPtr<ITestCandidateView> view;
         if(!get||FAILED(get(transinput::ClassId,IID_PPV_ARGS(&factory)))||FAILED(factory->CreateInstance(nullptr,IID_PPV_ARGS(&view))))result=5;
-        else for(const uint32_t dpi:{96u,144u,192u})for(const BOOL bottom:{FALSE,TRUE}){
+        else {
+            uint32_t placements{},paints{};const auto presented=view->CheckPresentation(&placements,&paints);
+            if(FAILED(presented)){std::fprintf(stderr,"native presentation regression failed: 0x%08lx placements=%u paints=%u\n",static_cast<unsigned long>(presented),placements,paints);result=7;}
+            else std::printf("PASS: 32 coalesced pending/ready cycles; one native placement/show, no hide, %u complete paints; delayed-frame expiry/cancel; owned offscreen windows only\n",paints);
+        for(const uint32_t dpi:{96u,144u,192u})for(const BOOL bottom:{FALSE,TRUE}){
             const auto path=std::wstring(argv[2])+L"\\candidate-"+std::to_wstring(dpi)+(bottom?L"-bottom.png":L"-top.png");uint32_t content{},maximum{};
             const auto rendered=view->RenderPreview(path.c_str(),dpi,bottom,&content,&maximum);
             if(FAILED(rendered)||maximum==0||content<=maximum){std::fprintf(stderr,"candidate preview failed: 0x%08lx\n",static_cast<unsigned long>(rendered));result=6;}
             else std::printf("preview dpi=%u bottom=%d content=%u max_scroll=%u\n",dpi,bottom,content,maximum);
+        }
         }
     }
     FreeLibrary(module);CoUninitialize();return result;

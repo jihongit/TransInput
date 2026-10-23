@@ -125,9 +125,18 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     ComPtr<ITfDocumentMgr> document;
     std::function<HRESULT(transinput::UiAction,size_t,uint64_t)> ui_action;
     RECT last_caret{};HWND last_owner{};bool native_visible{};
+    bool pending_frame{};
+    static constexpr UINT_PTR frame_timer=1;
     transinput::accessibility::Bridge accessibility;
+#ifdef TI_TRANSLATION_FIXTURE
+    bool offscreen_fixture{};uint32_t placements{},paints{},shows{},hides{};
+#endif
 
-    void NativeHide()noexcept{accessibility.Hide();if(window){if(native_visible)NotifyWinEvent(EVENT_OBJECT_IME_HIDE,window,OBJID_CLIENT,CHILDID_SELF);ShowWindow(window,SW_HIDE);}native_visible=false;}
+    void NativeHide()noexcept{if(window&&pending_frame)KillTimer(window,frame_timer);pending_frame=false;if(!native_visible)return;native_visible=false;accessibility.Hide();if(window){
+#ifdef TI_TRANSLATION_FIXTURE
+        ++hides;
+#endif
+        NotifyWinEvent(EVENT_OBJECT_IME_HIDE,window,OBJID_CLIENT,CHILDID_SELF);ShowWindow(window,SW_HIDE);}}
     void AccessibilitySnapshot()noexcept{
         if(!window||!native_visible||layout_dirty)return;
         try{RECT bounds{};if(!GetWindowRect(window,&bounds))return;std::vector<RECT> rows;rows.reserve(candidates.size());
@@ -155,7 +164,11 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     void ScrollInfo()const noexcept{
         if(!window)return;
         SCROLLINFO info{sizeof info,SIF_RANGE|SIF_PAGE|SIF_POS,0,std::max(0,layout.Content()-1),static_cast<UINT>(layout.Viewport()),layout.Offset(),0};
-        SetScrollInfo(window,SB_VERT,&info,TRUE);ShowScrollBar(window,SB_VERT,layout.MaxOffset()>0);
+        SCROLLINFO previous{sizeof previous,SIF_RANGE|SIF_PAGE|SIF_POS};
+        if(!GetScrollInfo(window,SB_VERT,&previous)||previous.nMin!=info.nMin||previous.nMax!=info.nMax||previous.nPage!=info.nPage||previous.nPos!=info.nPos)
+            SetScrollInfo(window,SB_VERT,&info,TRUE);
+        const bool shown=(GetWindowLongPtrW(window,GWL_STYLE)&WS_VSCROLL)!=0;
+        if(shown!=(layout.MaxOffset()>0))ShowScrollBar(window,SB_VERT,layout.MaxOffset()>0);
     }
     void ScrollTo(int offset)noexcept{
         if(layout.ScrollTo(offset)){interaction.Changed();ScrollInfo();Refresh();}
@@ -198,7 +211,18 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
     }
     void Hide() noexcept { visible = false;interaction.Cancel();ui.End();document.Reset();NativeHide(); }
     void Suspend() noexcept {interaction.Cancel();painted_generation=0;NativeHide();}
-    void Refresh() noexcept { if (window) InvalidateRect(window, nullptr, FALSE); }
+    void Refresh() noexcept {
+        if(!window)return;
+        // Do not flash a blank intermediate frame between a key and its local
+        // asynchronous result. This never delays input, query submission, or
+        // invalidation of old hit targets; only painting waits, at most 40 ms.
+        if(native_visible&&candidates.empty()){
+            if(!pending_frame){pending_frame=SetTimer(window,frame_timer,40,nullptr)!=0;if(!pending_frame)InvalidateRect(window,nullptr,FALSE);}
+            return;
+        }
+        if(pending_frame){KillTimer(window,frame_timer);pending_frame=false;}
+        InvalidateRect(window,nullptr,FALSE);
+    }
     std::optional<size_t> HitTest(LPARAM point) const noexcept {
         if(!visible||!window||!font_dpi||layout_dirty||painted_generation!=interaction.Generation())return {};
         RECT bounds{};if(!GetClientRect(window,&bounds))return {};
@@ -229,6 +253,7 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         }
         if(GetWindow(window,GW_OWNER)!=owner)SetWindowLongPtrW(window,GWLP_HWNDPARENT,reinterpret_cast<LONG_PTR>(owner));
         const UINT dpi = owner ? GetDpiForWindow(owner) : GetDpiForWindow(window);
+        const bool same_dpi=font_dpi==dpi;
         if (!font || font_dpi != dpi) {
             if (font) DeleteObject(font);
             font = CreateFontW(-MulDiv(18, static_cast<int>(dpi), 96), 0, 0, 0, FW_NORMAL,
@@ -244,21 +269,44 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         row_width=width-Px(64)-GetSystemMetricsForDpi(SM_CXVSCROLL,dpi);
         auto heights=Measure(target.dc,row_width);
         int content{};for(const auto height:heights)content+=height;
-        const int height=std::min(Px(100)+content,std::max(Px(100),static_cast<int>(monitor.rcWork.bottom-monitor.rcWork.top)-Px(12)));
+        const int maximum=std::max(Px(100),static_cast<int>(monitor.rcWork.bottom-monitor.rcWork.top)-Px(12));
+        RECT previous{};GetWindowRect(window,&previous);const bool was_visible=native_visible;
+        // Waiting rows cannot be selected, but should not collapse and expand
+        // the popup on every keystroke. Reuse only its size, never old contents.
+        const int height=std::min(candidates.empty()&&was_visible&&same_dpi?
+            std::max(Px(100),static_cast<int>(previous.bottom-previous.top)):Px(100)+content,maximum);
         layout.Set(std::move(heights),std::max(0,height-Px(92)));layout_dirty=false;
-        const int x = std::clamp(caret.left, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
+        int x = std::clamp(caret.left, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
         const int gap = MulDiv(6, static_cast<int>(dpi), 96);
         int y = caret.bottom + gap;
         if (y + height > monitor.rcWork.bottom) y = caret.top - height - gap;
         y = std::max(y, static_cast<int>(monitor.rcWork.top));
-        RECT previous{};GetWindowRect(window,&previous);const bool was_visible=native_visible;
-        if(!SetWindowPos(window, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW))return;
+#ifdef TI_TRANSLATION_FIXTURE
+        // Native rendering regression stays outside the user's desktop. This
+        // switch and the probe interface do not exist in the production DLL.
+        if(offscreen_fixture){x=GetSystemMetrics(SM_XVIRTUALSCREEN)-4096;y=GetSystemMetrics(SM_YVIRTUALSCREEN)-4096;}
+#endif
+        const bool moved=previous.left!=x||previous.top!=y;
+        const bool resized=previous.right-previous.left!=width||previous.bottom-previous.top!=height;
+        if(!was_visible||moved||resized){
+            UINT flags=SWP_NOACTIVATE|SWP_NOOWNERZORDER;
+            if(was_visible)flags|=SWP_NOZORDER;else flags|=SWP_SHOWWINDOW;
+            if(!moved)flags|=SWP_NOMOVE;if(!resized)flags|=SWP_NOSIZE;
+            if(!SetWindowPos(window,HWND_TOPMOST,x,y,width,height,flags))return;
+#ifdef TI_TRANSLATION_FIXTURE
+            ++placements;
+#endif
+        }
         native_visible=true;
         AccessibilitySnapshot();
-        if(!was_visible){NotifyWinEvent(EVENT_OBJECT_IME_SHOW,window,OBJID_CLIENT,CHILDID_SELF);accessibility.Show(&live_objects);}
-        else if(previous.left!=x||previous.top!=y||previous.right!=x+width||previous.bottom!=y+height)NotifyWinEvent(EVENT_OBJECT_IME_CHANGE,window,OBJID_CLIENT,CHILDID_SELF);
+        if(!was_visible){
+#ifdef TI_TRANSLATION_FIXTURE
+            ++shows;
+#endif
+            NotifyWinEvent(EVENT_OBJECT_IME_SHOW,window,OBJID_CLIENT,CHILDID_SELF);accessibility.Show(&live_objects);}
+        else if(moved||resized)NotifyWinEvent(EVENT_OBJECT_IME_CHANGE,window,OBJID_CLIENT,CHILDID_SELF);
         ScrollInfo();
-        Refresh();
+        if(!was_visible||resized)Refresh();
     }
     static LRESULT CALLBACK Procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
         if (message == WM_NCCREATE) {
@@ -274,6 +322,7 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
         }
         if(self){
             try{
+                if(message==WM_TIMER&&wparam==frame_timer){KillTimer(hwnd,frame_timer);self->pending_frame=false;InvalidateRect(hwnd,nullptr,FALSE);return 0;}
                 if(message==WM_GETOBJECT&&self->window==hwnd&&self->native_visible&&static_cast<LONG>(lparam)==UiaRootObjectId)return UiaReturnRawElementProvider(hwnd,wparam,lparam,self->accessibility.Root(&live_objects));
                 if(message==WM_DESTROY)self->accessibility.Disconnect();
                 if(message==WM_MOUSEWHEEL){self->ScrollTo(self->layout.Offset()-GET_WHEEL_DELTA_WPARAM(wparam)*self->Px(3*32)/WHEEL_DELTA);return 0;}
@@ -308,8 +357,19 @@ struct CandidateView:std::enable_shared_from_this<CandidateView> {
             const auto lifetime=self->shared_from_this();
             PAINTSTRUCT paint{};
             HDC dc = BeginPaint(hwnd, &paint);
+            if(self->pending_frame){EndPaint(hwnd,&paint);return 0;}
             RECT bounds{}; GetClientRect(hwnd, &bounds);
-            try{self->Draw(dc,bounds);self->painted_generation=self->interaction.Generation();}catch(...){self->painted_generation=0;}
+            // Draw a complete frame offscreen; direct FillRect/text operations
+            // briefly exposed a blank popup for every candidate update.
+            const auto memory=CreateCompatibleDC(dc);
+            const auto bitmap=memory?CreateCompatibleBitmap(dc,std::max(1L,bounds.right),std::max(1L,bounds.bottom)):nullptr;
+            const auto old=bitmap?SelectObject(memory,bitmap):nullptr;
+            try{self->Draw(bitmap?memory:dc,bounds);if(bitmap)BitBlt(dc,0,0,bounds.right,bounds.bottom,memory,0,0,SRCCOPY);self->painted_generation=self->interaction.Generation();
+#ifdef TI_TRANSLATION_FIXTURE
+                ++self->paints;
+#endif
+            }catch(...){self->painted_generation=0;}
+            if(old)SelectObject(memory,old);if(bitmap)DeleteObject(bitmap);if(memory)DeleteDC(memory);
             EndPaint(hwnd, &paint);
             return 0;
         }
@@ -437,8 +497,13 @@ void PositionCandidates(ContextState& state,TfEditCookie cookie){
     // of the complete (possibly wrapped) preedit. Never reuse old coordinates.
     RECT caret{};BOOL clipped{};
     if(FAILED(selection_result)||fetched!=1||!anchor||
-        FAILED(anchor->Collapse(cookie,selection.style.ase==TF_AE_START?TF_ANCHOR_START:TF_ANCHOR_END))||
-        FAILED(context_view->GetTextExt(cookie,anchor.Get(),&caret,&clipped))||clipped||caret.bottom<=caret.top){state.view->Suspend();return;}
+        FAILED(anchor->Collapse(cookie,selection.style.ase==TF_AE_START?TF_ANCHOR_START:TF_ANCHOR_END))){state.view->Suspend();return;}
+    const auto extent=context_view->GetTextExt(cookie,anchor.Get(),&caret,&clipped);
+    // A pending layout is normal immediately after editing in Chromium hosts.
+    // Leave an already shown frame intact until OnLayoutChange supplies a new
+    // caret; never show a new popup using guessed/previous coordinates.
+    if(extent==TS_E_NOLAYOUT&&state.view->last_owner==owner)return;
+    if(FAILED(extent)||clipped||caret.bottom<=caret.top){state.view->Suspend();return;}
     state.view->Position(caret,owner);
 }
 class AnchorSession final : public ITfEditSession {
@@ -584,7 +649,7 @@ public:
                 if (FAILED(state_->last_error)) {TraceFailure("text edit operation",state_->last_error);state_->unavailable=true;DiscardCommands(*state_);break; }
             }
             state_->scheduled = false;
-            if(SUCCEEDED(state_->last_error))PositionCandidates(*state_,cookie);
+            if(SUCCEEDED(state_->last_error))ScheduleAnchor(state_);
             return state_->last_error;
         } catch (...) { state_->scheduled=false;state_->last_error=E_FAIL;state_->unavailable=true;DiscardCommands(*state_);return E_FAIL; }
     }
@@ -821,7 +886,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
             catch(...){state->candidates.clear();state->unavailable=true;}
         }
         if(state->candidates.empty())state->selected=0;else state->selected=std::min(state->selected,state->candidates.size()-1);
-        OfferTranslation(*state);Publish(state);Enqueue(state,{OperationKind::Update,state->input,state->cursor});
+        OfferTranslation(*state);Publish(state);ScheduleAnchor(state);
     }
 
     void TranslationReply(transinput::TranslationReply reply){
@@ -833,7 +898,7 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
         if(!TranslationMode(*state)||state->scope!=transinput::Scope::Allowed)return;
         state->translation_status=reply.result.status||(reply.result.view.enabled&&reply.result.view.status==1)?5:reply.result.view.status;
         state->translation_output=reply.result.status?std::wstring{}:Wide(reply.result.view.output);
-        Publish(state);Enqueue(state,{OperationKind::Update,state->input,state->cursor});
+        Publish(state);ScheduleAnchor(state);
     }
 
     void Cancel() {
@@ -898,6 +963,39 @@ class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink
     }
 public:
 #ifdef TI_TRANSLATION_FIXTURE
+    HRESULT STDMETHODCALLTYPE CheckPresentation(uint32_t* placements,uint32_t* paints) override {
+        if(!placements||!paints)return E_POINTER;*placements=0;*paints=0;
+        try{
+            const auto owner=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"STATIC",L"TransInput owned offscreen rendering fixture",WS_POPUP,
+                GetSystemMetrics(SM_XVIRTUALSCREEN)-8192,GetSystemMetrics(SM_YVIRTUALSCREEN)-8192,100,100,nullptr,nullptr,module_handle,nullptr);
+            if(!owner)return E_FAIL;
+            struct Window{HWND value;~Window(){DestroyWindow(value);}} owned{owner};
+            ShowWindow(owner,SW_SHOWNOACTIVATE);if(!IsWindowVisible(owner))ShowWindow(owner,SW_SHOWNOACTIVATE);
+            auto view=std::make_shared<CandidateView>();view->visible=true;view->offscreen_fixture=true;
+            const std::vector<std::wstring> rows(9,L"测试");view->candidates=rows;view->preedit=L"n";view->ContentChanged();
+            RECT caret{100,100,101,124};view->Position(caret,owner);UpdateWindow(view->window);
+            if(!view->native_visible)return E_FAIL;
+            RECT bounds{};GetWindowRect(view->window,&bounds);
+            if(bounds.right>GetSystemMetrics(SM_XVIRTUALSCREEN)&&bounds.bottom>GetSystemMetrics(SM_YVIRTUALSCREEN))return E_FAIL;
+            for(unsigned i=0;i<32;++i){
+                const auto painted=view->paints;
+                view->preedit+=L'i';view->candidates.clear();view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
+                if(!view->pending_frame||view->paints!=painted||view->painted_generation==view->interaction.Generation())return E_FAIL;
+                RECT pending{};GetWindowRect(view->window,&pending);if(!EqualRect(&bounds,&pending))return E_FAIL;
+                view->candidates=rows;view->ContentChanged();view->Position(caret,owner);view->Refresh();UpdateWindow(view->window);
+                if(view->pending_frame||view->paints!=painted+1)return E_FAIL;
+            }
+            *placements=view->placements;*paints=view->paints;
+            if(view->placements!=1||view->shows!=1||view->hides||view->paints<33)return E_FAIL;
+            view->candidates.clear();view->ContentChanged();view->Refresh();SendMessageW(view->window,WM_TIMER,CandidateView::frame_timer,0);UpdateWindow(view->window);
+            if(view->pending_frame||view->paints!=*paints+1)return E_FAIL;
+            // Hiding before a delayed frame must cancel its timer as well.
+            view->Refresh();if(!view->pending_frame)return E_FAIL;
+            view->Hide();view->Hide();if(view->hides!=1)return E_FAIL;
+            if(view->pending_frame)return E_FAIL;
+            return S_OK;
+        }catch(...){return E_FAIL;}
+    }
     HRESULT STDMETHODCALLTYPE SuppressWindow(BOOL suppress) override {
         if(!manager_||GetCurrentThreadId()!=owner_thread_||!view_)return E_UNEXPECTED;
         view_->suppress_window=suppress!=FALSE;if(view_->suppress_window)view_->Suspend();return S_OK;

@@ -23,6 +23,9 @@ if($tiPlan.executed -or $tiPlan.sets_default -or $tiPlan.changes_trust_or_policy
 $tiDenied=$false
 try {& (Join-Path $PSScriptRoot 'install-local-preview.ps1') -Action Install}catch {if($_.Exception.Message -like 'Explicit -AcceptUnsignedLocalPreview*'){$tiDenied=$true}else{throw}}
 if(-not $tiDenied){throw 'Unsigned preview did not require acknowledgement'}
+$tiDenied=$false
+try {& (Join-Path $PSScriptRoot 'update-local-preview-tip.ps1') -Action Apply -PackagePath 'fixed-missing-preview'}catch {if($_.Exception.Message -like 'Explicit unsigned-preview acknowledgement*'){$tiDenied=$true}else{throw}}
+if(-not $tiDenied){throw 'Unsigned TIP update did not require acknowledgement'}
 $tiCaseIndex=0
 foreach($tiCase in @(
  @{arguments=@('--register-local-preview');code=2},

@@ -2,6 +2,8 @@
 
 状态：已实现Rust核心、Windows TSF、中文输入与可选DeepSeek翻译；当前已安装本机未签名验收版，正式发行尚未就绪。更新日期：2026-10-23（Asia/Shanghai）。最新检查与阻塞见 [Windows交付记录](docs/DELIVERY.md)。
 
+系统安装版首次真实输入反馈出现候选闪烁/卡顿，已修复并更新本机两个架构的输入法 DLL；本轮完整74项与更新回滚检查通过，更新后的真实应用体验仍待用户重新打开应用验收。详见 [候选闪烁修复与证据](docs/testing/2026-10-23-candidate-flicker.md)。旧进程不会被强制关闭。
+
 仓库 [jihongit/TransInput](https://github.com/jihongit/TransInput) 当前为**私有验收仓库**，须登录授权账号访问。只有用户验收并明确同意后才可公开，不发布公开安装包或分享链接。此前GitHub Windows x64/x86构建记录保留，但不代替系统安装、真实应用和长时验收。
 
 TransInput 面向中文用户：本地完成中文输入，可选使用 DeepSeek 将当前中文翻译成自然、准确的美式英语，并选择中文、英文或双语上屏。
